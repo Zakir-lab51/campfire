@@ -14,6 +14,10 @@
   --line-2: rgba(60, 44, 30, 0.26);
   --card: rgba(246, 238, 220, 0.72);
   --panel: rgba(240, 230, 207, 0.95);
+  /* frosted glass for the side panel and the to-do list: the map shows through, blurred */
+  --glass: rgba(236, 224, 197, 0.4);
+  --glass-solid: rgba(236, 224, 197, 0.82);
+  --glass-blur: blur(5px) saturate(1.1);
   --shadow: 0 12px 30px -14px rgba(45, 28, 12, 0.55);
   --radius: 14px;
   --header-h: 168px;
@@ -146,6 +150,8 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
     box-shadow: 10px 0 40px -10px rgba(40, 25, 10, .5); transform: translateX(-104%); transition: transform .28s var(--ease); visibility: hidden;
   }
   .app[data-view="map"].drawer-open .sidebar { transform: none; visibility: visible; }
+  .app[data-view="map"] .sidebar { background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+  .app[data-view="map"] .sb-drawer-head { background: var(--glass-solid); }
   .app[data-view="map"] .sb-drawer-head { display: flex; position: sticky; top: 0; z-index: 2; }
   .scrim { position: fixed; inset: 0; z-index: 1250; background: rgba(30, 20, 10, .35); }
 }
@@ -156,7 +162,8 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
 .map-fab {
   position: absolute; z-index: 600; top: 10px; left: 10px;
   display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 14px 0 12px;
-  border-radius: 10px; border: 1px solid var(--line-2); background: var(--panel); box-shadow: var(--shadow);
+  border-radius: 10px; border: 1px solid var(--line-2); box-shadow: var(--shadow);
+  background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   font: 700 14px var(--f-ui); color: var(--ink); -webkit-user-select: none; user-select: none;
 }
 .map-fab svg { width: 18px; height: 18px; }
@@ -165,7 +172,7 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
   display: none; position: absolute; z-index: 650; top: 14px; left: 0;
   width: 26px; height: 54px; place-items: center; padding: 0;
   border: 1px solid var(--line-2); border-left: 0; border-radius: 0 10px 10px 0;
-  background: var(--panel); color: var(--ink); box-shadow: var(--shadow);
+  background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); color: var(--ink); box-shadow: var(--shadow);
 }
 .panel-toggle:hover { color: var(--ember); }
 .panel-toggle svg { width: 18px; height: 18px; stroke-width: 2.2; transition: transform .28s var(--ease); }
@@ -446,7 +453,16 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
   .sb-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ember); }
   .guide-inner { padding: 14px 14px 40px; }
   .toc-list { grid-template-columns: 1fr 1fr; }
-  .view-map { grid-column: 2; grid-row: 1 / 3; height: auto; display: block !important; }
+  /* the map runs under the side panel, which is frosted glass over it */
+  .view-map { grid-column: 1 / -1; grid-row: 1 / 3; height: auto; display: block !important; z-index: 0; }
+  .topbar, .sidebar { -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+  .topbar { z-index: 5; background: var(--glass); border-right: 1px solid var(--line-2); }
+  .sidebar { position: relative; z-index: 4; background: var(--glass); }
+  .sb-tabs { background: var(--glass-solid) !important; }
+  .panel-toggle { left: var(--side-w); transition: left .28s var(--ease); }
+  .app.panel-collapsed .panel-toggle { left: 0; }
+  .map-bottom { left: calc(var(--side-w) + 10px); transition: left .28s var(--ease); }
+  .app.panel-collapsed .map-bottom { left: 10px; }
   .map-bottom { right: auto; width: 380px; }
   .placecard { left: auto; right: 14px; top: 14px; bottom: auto; width: 360px; max-height: calc(100% - 90px); }
   .placecard .grab { display: none; }
@@ -501,14 +517,16 @@ button, a, .chip, .cat, .mk, .hd-check { -webkit-tap-highlight-color: transparen
 :root { --todo-w: min(320px, 86vw); --todo-tab: 34px; }
 .todo {
   position: absolute; z-index: 690; top: 0; right: 0; bottom: 0; width: var(--todo-w); display: flex; flex-direction: column;
-  background: var(--panel); border-left: 1px solid var(--line-2); box-shadow: -12px 0 30px -18px rgba(45, 28, 12, .55);
+  background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border-left: 1px solid var(--line-2); box-shadow: -12px 0 30px -18px rgba(45, 28, 12, .55);
   padding-bottom: env(safe-area-inset-bottom); animation: todoIn .25s var(--ease);
 }
 @keyframes todoIn { from { transform: translateX(30px); opacity: 0; } }
 /* same height and size as the side panel's tab on the left edge, so the two line up */
 .todo-toggle {
   position: absolute; z-index: 695; top: 14px; right: 0; display: grid; place-items: center; align-content: center; gap: 3px; width: var(--todo-tab); height: 54px; padding: 0;
-  border: 1px solid var(--line-2); border-right: 0; border-radius: 10px 0 0 10px; background: var(--panel); color: var(--ink); box-shadow: var(--shadow);
+  border: 1px solid var(--line-2); border-right: 0; border-radius: 10px 0 0 10px; color: var(--ink); box-shadow: var(--shadow);
+  background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
 }
 .todo-toggle svg { width: 19px; height: 19px; stroke-width: 2.1; }
 .todo-toggle:hover { color: var(--ember); }
@@ -622,4 +640,9 @@ button, a, .chip, .cat, .mk, .hd-check { -webkit-tap-highlight-color: transparen
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* browsers without backdrop blur: keep the panes readable */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --glass: rgba(236, 224, 197, 0.92); }
 }

@@ -551,7 +551,7 @@
     $('#scrim').addEventListener('click', () => setDrawer(false));
     $('#panelToggle').addEventListener('click', () => setPanelOpen($('#layout').classList.contains('panel-collapsed'), true));
     if (store.get('panel', 'open') === 'collapsed') setPanelOpen(false, false);
-    desktop.addEventListener?.('change', () => { setDrawer(false); S.map && setTimeout(() => S.map.invalidateSize(), 50); });
+    desktop.addEventListener?.('change', () => { setDrawer(false); S.map && setTimeout(() => { S.map.invalidateSize(); setMapBounds(); }, 50); });
     S.mapShown = true;
   }
 
@@ -584,12 +584,12 @@
     const label = open ? 'Hide the side panel' : 'Show the side panel';
     btn.setAttribute('aria-expanded', String(open)); btn.setAttribute('aria-label', label); btn.title = label;
     if (save) store.set('panel', open ? 'open' : 'collapsed');
-    // Keep the map centred while the panel slides (about 0.3 s).
-    if (!S.map) return;
-    const until = performance.now() + 340;
-    const step = () => { S.map.invalidateSize(); if (performance.now() < until) requestAnimationFrame(step); };
-    requestAnimationFrame(step);
-    setTimeout(() => S.map.invalidateSize(), 360);
+    // The map runs under the glass panel, so it keeps its size: slide the view half the panel's
+    // width instead, keeping the same spot in the middle of the open area.
+    if (!S.map || !desktop.matches) return;
+    const half = sideWidth() / 2;
+    if (open) { setMapBounds(); S.map.panBy([-half, 0]); }
+    else { S.map.once('moveend', setMapBounds); S.map.panBy([half, 0]); }    // tighten once the slide ends
   }
 
   function setDrawer(open) {
@@ -632,10 +632,12 @@
     }
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     S.homeBounds = bounds;
+    setTodoOpen(store.get('todoOpen', false), false);   // before the first view, which leaves room for it
     homeView();
     // The container may get its final size after fonts/header settle; refit once it has.
     requestAnimationFrame(() => { map.invalidateSize(); homeView(); });
     map.on('zoomend', zoomClass); zoomClass();
+    map.on('zoomend', setMapBounds);
     map.on('resize', fitMinZoom);
     map.on('click', () => closePlace());
 
@@ -661,6 +663,18 @@
   }
 
   const ll = (p) => [-p.y, p.x];
+
+  // On wide screens the map runs under the glass side panel (left) and the to-do list (right).
+  const sideWidth = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--side-w')) || 0;
+  const sideCover = () => (desktop.matches && !$('#layout').classList.contains('panel-collapsed') ? sideWidth() : 0);
+
+  // Panning may go past the map's edges by what the panes cover, so no corner of the map is
+  // stuck underneath one. Bounds are in map units, so they're re-worked out at each zoom.
+  function setMapBounds() {
+    if (!S.map?._loaded) return;                     // no view yet
+    const s = 2 ** S.map.getZoom();
+    S.map.setMaxBounds(L.latLngBounds([[-S.H, -sideCover() / s], [0, S.W + todoCover() / s]]));
+  }
 
   // After the map settles, quietly fetch the tiles for the next zoom level in (and the one out)
   // over the current view, so the next zoom shows sharp tiles straight away. Skipped when the
@@ -713,7 +727,14 @@
     S.map.invalidateSize({ pan: false });
     fitMinZoom();
     const size = S.map.getSize(), min = S.map.getMinZoom();
-    if (size.x >= 700) { S.map.setView([-S.H / 2, S.W / 2], min, { animate: false }); return; }
+    if (size.x >= 700) {
+      setMapBounds();
+      const z = S.map.getBoundsZoom(S.homeBounds, true, L.point(sideCover() + todoCover(), 0));   // fill the open area
+      const mid = S.map.project([-S.H / 2, S.W / 2], z).add([(todoCover() - sideCover()) / 2, 0]);
+      S.map.setView(S.map.unproject(mid, z), z, { animate: false });
+      setMapBounds();
+      return;
+    }
     const z = Math.max(min, Math.min(0, Math.log2(Math.min(size.x / 1150, size.y / 900))));
     S.map.setView([-720, 1420], Math.ceil(z * 4) / 4, { animate: false });
   }
@@ -1402,7 +1423,7 @@
       const bottom = desktop.matches ? 24 : $('#mapBottom').offsetHeight + 24;
       // A range spanning nearly the whole map would shrink to a strip on a phone: start on the main landmass instead.
       if (!desktop.matches && S.map.getBoundsZoom(res.bounds, false, L.point(32, 70 + bottom)) < -1.5) { homeView(); return; }
-      S.map.fitBounds(res.bounds, { paddingTopLeft: [16, 70], paddingBottomRight: [16 + todoCover(), bottom], maxZoom: -0.5 });
+      S.map.fitBounds(res.bounds, { paddingTopLeft: [16 + sideCover(), 70], paddingBottomRight: [16 + todoCover(), bottom], maxZoom: -0.5 });
     });
   }
 
@@ -1441,7 +1462,7 @@
       if (!S.hits?.length) return;                    // cleared before the frame came round
       ensureView();
       if (S.hits.length === 1) centerBesideCard(S.hits[0], 0, true);
-      else S.map.fitBounds(L.latLngBounds(S.hits.map(ll)).pad(0.25), { paddingBottomRight: [todoCover(), 0], maxZoom: 0 });
+      else S.map.fitBounds(L.latLngBounds(S.hits.map(ll)).pad(0.25), { paddingTopLeft: [sideCover(), 0], paddingBottomRight: [todoCover(), 0], maxZoom: 0 });
     });
   }
 
@@ -1462,12 +1483,13 @@
   function centerBesideCard(p, zoom, animate) {
     const card = $('#placeCard');
     const size = S.map.getSize();
-    let dx = todoCover() / 2, dy = 0;
+    let right = todoCover(), dy = 0;
     if (!card.hidden) {
       const cw = card.offsetWidth + 14;                 // beside the to-do list when there's room, over it when not
-      if (desktop.matches) dx = Math.min($('#layout').classList.contains('todo-room') ? cw + todoCover() : Math.max(cw, todoCover()), size.x * 0.6) / 2;
+      if (desktop.matches) right = Math.min($('#layout').classList.contains('todo-room') ? cw + todoCover() : Math.max(cw, todoCover()), size.x * 0.6);
       else dy = Math.min(card.offsetHeight + 8, size.y * 0.6) / 2;
     }
+    const dx = (right - sideCover()) / 2;                // the open area's middle, between the side panel and the right-hand cover
     const pt = S.map.project(ll(p), zoom).add([dx, dy]);
     S.map.setView(S.map.unproject(pt, zoom), zoom, { animate });
   }
@@ -1559,7 +1581,6 @@
 
   function initTodo() {
     const q = $('#tdQ'), sugg = $('#tdSugg');
-    setTodoOpen(store.get('todoOpen', false), false);
     $('#todoToggle').addEventListener('click', () => setTodoOpen(!$('#layout').classList.contains('todo-open'), true));
     $('#tdClose').addEventListener('click', () => setTodoOpen(false, true));
     let active = -1, last = null;
@@ -1680,6 +1701,7 @@
     b.setAttribute('aria-expanded', String(open));
     b.setAttribute('aria-label', open ? 'Hide the to-do list' : 'Show the to-do list');
     if (save) store.set('todoOpen', open);
+    setMapBounds();
   }
 
   // Fit the map to every pin of a layer (orchids, gator eggs).
@@ -1687,7 +1709,7 @@
     const pts = S.data.places.filter((p) => p.type === type && p.x != null);
     if (!pts.length) return;
     if (!desktop.matches) setView('map');
-    S.map.fitBounds(L.latLngBounds(pts.map(ll)), { paddingTopLeft: [40, 40], paddingBottomRight: [40 + todoCover(), 40], maxZoom: -0.5 });
+    S.map.fitBounds(L.latLngBounds(pts.map(ll)), { paddingTopLeft: [40 + sideCover(), 40], paddingBottomRight: [40 + todoCover(), 40], maxZoom: -0.5 });
   }
 
   /* ---------- hunting spot finder (map tab) ----------
