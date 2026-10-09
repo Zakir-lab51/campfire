@@ -42,6 +42,7 @@
     request:         { label: 'Item request',      color: '#33406a', glyph: 'letter' },
     orchid:          { label: 'Orchid',            color: '#bd5480', glyph: 'flower' },
     'gator-egg':     { label: 'Gator eggs',        color: '#66803a', glyph: 'egg' },
+    hunt:            { label: 'Hunting spot',      color: '#5d6d1e', glyph: 'target', named: true },
   };
   // White pictures drawn inside the pins (24x24 grid; class "f" = filled).
   const GLYPHS = {
@@ -70,6 +71,7 @@
     letter: '<rect x="3" y="6" width="18" height="12.5" rx="1"/><path d="M3 7l9 6.2L21 7"/>',
     flower: '<circle cx="12" cy="6.6" r="2.7"/><circle cx="7.4" cy="10.2" r="2.7"/><circle cx="16.6" cy="10.2" r="2.7"/><circle cx="9.2" cy="15.6" r="2.7"/><circle cx="14.8" cy="15.6" r="2.7"/><circle class="f" cx="12" cy="11.2" r="1.9"/>',
     egg: '<path d="M12 3c3.5 0 6 5.6 6 10.2a6 6 0 0 1-12 0C6 8.6 8.5 3 12 3z"/>',
+    target: '<circle cx="12" cy="12" r="6.6"/><circle class="f" cx="12" cy="12" r="2"/><path d="M12 2.6v4.2M12 17.2v4.2M2.6 12h4.2M17.2 12h4.2"/>',
     grid: '<path d="M4 4h16v16H4zM4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16"/>',
     leaf: '<path d="M5 19.5C4.6 11 9.6 4.8 20 4c.4 10.2-5.6 15.6-15 15.5z"/><path d="M5 19.5l8.6-8.6"/>',
   };
@@ -83,7 +85,7 @@
   const CAT_GROUPS = [
     ['Places', ['town', 'camp', 'landmark', 'hideout', 'shack', 'poi', 'shop']],
     ['People & jobs', ['stranger', 'special', 'bounty', 'request']],
-    ['Hunting & gathering', ['legendary', 'legendary-fish', ':ranges', ':plants']],
+    ['Hunting & gathering', ['hunt', 'legendary', 'legendary-fish', ':ranges', ':plants']],
     ['Collectibles', ['card', 'bone', 'carving', 'dreamcatcher', 'treasure', 'chest', 'tonic', 'unique', 'orchid', 'gator-egg']],
     ['On the map', [':grid']],
   ];
@@ -95,6 +97,8 @@
     chev: '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>',
     close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     leaf: '<svg viewBox="0 0 24 24"><path d="M5 19.5C4.6 11 9.6 4.8 20 4c.4 10.2-5.6 15.6-15 15.5z"/><path d="M5 19.5l8.6-8.6"/></svg>',
+    play: '<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3.5"/><path class="f" d="M10 9.2v5.6l4.8-2.8z"/></svg>',
+    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
     paw: '<svg viewBox="0 0 24 24"><path d="M12 13.5c-2.6 0-5 2.6-5 4.6 0 1.4 1.2 2.1 2.5 2.1 1 0 1.6-.5 2.5-.5s1.5.5 2.5.5c1.3 0 2.5-.7 2.5-2.1 0-2-2.4-4.6-5-4.6z"/><ellipse cx="5.5" cy="10.6" rx="1.7" ry="2.1"/><ellipse cx="9.3" cy="6.6" rx="1.7" ry="2.2"/><ellipse cx="14.7" cy="6.6" rx="1.7" ry="2.2"/><ellipse cx="18.5" cy="10.6" rx="1.7" ry="2.1"/></svg>',
   };
 
@@ -355,6 +359,7 @@
     });
     $('#results').addEventListener('click', (e) => {
       const fit = e.target.closest('[data-fit]'); if (fit) { showResults(false); fitHits(); return; }
+      const hu = e.target.closest('[data-hunt]'); if (hu) { showResults(false); if (!desktop.matches) setDrawer(true); pickHuntAnimal(hu.dataset.hunt, { fit: true }); return; }
       const r = e.target.closest('.result'); if (r) activateResult(r);
     });
   }
@@ -382,12 +387,17 @@
     const tokens = queryTokens();
     const plants = S.ranges && tokens.length ? S.data.ranges.species.filter((sp) => sp.kind === 'plant'
       && tokens.every((t) => wordRanges(sp.name, [t]).length)).slice(0, 3) : [];
-    if (!topics.length && !places.length && !plants.length) {
+    if (!topics.length && !places.length && !plants.length) {   // (hunting spots are places too)
       box.innerHTML = `<div class="results-empty">No matches for “${esc(q)}”. Try fewer words, or one of the quick searches.</div>`;
       return;
     }
+    const hunts = places.filter((r) => S.places.get(r.item.id)?.type === 'hunt');
+    places = places.filter((r) => S.places.get(r.item.id)?.type !== 'hunt');
     const tHtml = topics.slice(0, 10).map((r, i) => resultRow(r, i)).join('');
     const pHtml = places.slice(0, 8).map((r, i) => resultRow(r, i)).join('');
+    // the animal the query names, if it has hunting spots
+    const huntAnimal = huntAnimals().find((a) => tokens.length && tokens.every((t) => wordRanges(a.name + ' ' + a.alias, [t]).length));
+    const hGroup = hunts.length ? `<div class="results-group"><h3>Best hunting spots · ${hunts.length}</h3>${huntAnimal ? `<button class="chip" type="button" data-hunt="${esc(huntAnimal.topic)}">${glyph('target').replace('<svg', '<svg width="14" height="14"')}All ${esc(huntAnimal.name.toLowerCase())} spots</button>` : ''}</div>${hunts.slice(0, 6).map((r, i) => resultRow(r, i)).join('')}` : '';
     const mapped = places.filter((r) => S.places.get(r.item.id).x != null).length;
     const tGroup = topics.length ? `<div class="results-group"><h3>Guide topics · ${topics.length}</h3></div>${tHtml}` : '';
     const pGroup = places.length ? `<div class="results-group"><h3>Places · ${places.length}</h3>${mapped ? `<button class="chip" type="button" data-fit>${ICONS.map.replace('<svg', '<svg width="14" height="14"')}Show ${Math.min(mapped, 80)} on map</button>` : ''}</div>${pHtml}` : '';
@@ -403,7 +413,7 @@
       && tokens.every((t) => wordRanges(r.item.title, [t]).length)).slice(0, 3) : [];
     const rGroup = (species.length ? `<div class="results-group"><h3>Animal ranges</h3></div>${species.map((r, i) => rangeRow(r.item.id, i)).join('')}` : '')
       + (plants.length ? `<div class="results-group"><h3>Where plants grow</h3></div>${plants.map((sp, i) => rangeRow(sp.topic, i)).join('')}` : '');
-    box.innerHTML = rGroup + (placesFirst ? pGroup + tGroup : tGroup + pGroup);
+    box.innerHTML = rGroup + hGroup + (placesFirst ? pGroup + tGroup : tGroup + pGroup);
     S.activeResult = -1;
   }
 
@@ -631,6 +641,10 @@
     map.on('click', () => closePlace());
 
     const visible = new Set(store.get('layers', null) || S.data.layers.filter((l) => l.default).map((l) => l.id));
+    const known = store.get('layersKnown', null);
+    if (store.get('layers', null) && known) for (const l of S.data.layers) if (l.default && !known.includes(l.id)) visible.add(l.id);
+    if (store.get('layers', null) && !known) visible.add('hunt');           // layer added after this browser saved its choices
+    store.set('layersKnown', S.data.layers.map((l) => l.id));
     for (const l of S.data.layers) S.layerGroups.set(l.id, L.layerGroup());
     for (const p of S.data.places) {
       if (p.x == null || NAME_ONLY.has(p.type)) continue;
@@ -643,6 +657,7 @@
     S.gridLayer = buildGrid();
     renderCategories(visible);
     initRanges();
+    renderTodo();                                   // its Range links need the ranges
     S.mapReady = true;
   }
 
@@ -782,13 +797,15 @@
       const b = e.target.closest('[data-layer]'); if (!b) return;
       setLayer(b, b.getAttribute('aria-pressed') !== 'true'); save();
     });
+    initHuntFinder();
+    initTodo();
     $('#showAll').addEventListener('click', () => { $$('#catList [data-layer]').forEach((b) => setLayer(b, true)); save(); });
     $('#hideAll').addEventListener('click', () => { $$('#catList [data-layer]').forEach((b) => setLayer(b, false)); save(); });
     initProgress();
   }
 
   /* ---------- progress: places ticked off as found (kept in this browser) ---------- */
-  const trackable = (p) => p && p.x != null && !NAME_ONLY.has(p.type);
+  const trackable = (p) => p && p.x != null && !NAME_ONLY.has(p.type) && p.type !== 'hunt';
 
   function saveFound() { store.set('found', [...S.found]); keepStorage(); }
 
@@ -833,7 +850,9 @@
     $('#pgPct').textContent = `${pct < 1 && done ? pct.toFixed(1) : Math.floor(pct)}%`;
     $('#pgBar').style.width = `${pct}%`;
     for (const b of $$('#catList [data-layer]')) {
-      const t = b.dataset.layer, n = tot.get(t) || 0, g = got.get(t) || 0;
+      const t = b.dataset.layer;
+      if (!tot.has(t)) continue;                  // not a collectible (e.g. hunting spots): keep its plain count
+      const n = tot.get(t), g = got.get(t) || 0;
       const el = $('.n', b); if (!el) continue;
       el.textContent = g ? `${g}/${n}` : String(n);
       b.classList.toggle('is-done', !!n && g === n);
@@ -850,7 +869,7 @@
       for (const id of S.found) { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); }
     });
     $('#pgExport').addEventListener('click', async () => {
-      const json = JSON.stringify({ app: 'campfire', saved: new Date().toISOString(), found: [...S.found], done: [...S.done] }, null, 1);
+      const json = JSON.stringify({ app: 'campfire', saved: new Date().toISOString(), found: [...S.found], done: [...S.done], todo: S.todo }, null, 1);
       const name = 'campfire-progress.json';
       // On iPad/iPhone (and in the home-screen app) the share sheet is the reliable way to save a file.
       if (touch && navigator.canShare) {
@@ -868,15 +887,20 @@
     file.addEventListener('change', async () => {
       const f = file.files[0]; file.value = ''; if (!f) return;
       let ids, done = [];
-      try { const j = JSON.parse(await f.text()); ids = Array.isArray(j) ? j : j.found; done = Array.isArray(j.done) ? j.done : []; } catch { ids = null; }
+      let todo = [];
+      try { const j = JSON.parse(await f.text()); ids = Array.isArray(j) ? j : j.found; done = Array.isArray(j.done) ? j.done : []; todo = Array.isArray(j.todo) ? j.todo : []; } catch { ids = null; }
       if (!Array.isArray(ids)) { alert("That file doesn't look like a Campfire progress file."); return; }
       const fresh = ids.filter((id) => trackable(S.places.get(id)) && !S.found.has(id));
       for (const id of fresh) S.found.add(id);
       const ticks = done.filter((id) => typeof id === 'string' && !S.done.has(id));
       for (const id of ticks) S.done.add(id);
+      const have = new Set(S.todo.map((t) => t.id));
+      const newTodos = todo.filter((t) => t && typeof t.id === 'string' && typeof t.text === 'string' && !have.has(t.id)).map(cleanTodo);
+      if (newTodos.length) { S.todo.push(...newTodos); saveTodo(); renderTodo(); }
       saveFound(); store.set('done', [...S.done]);
       fresh.forEach((id) => refreshMarker(S.places.get(id))); renderProgress(); syncHundred();
-      const parts = [fresh.length && `${fresh.length} found place${fresh.length === 1 ? '' : 's'}`, ticks.length && `${ticks.length} checklist tick${ticks.length === 1 ? '' : 's'}`].filter(Boolean);
+      const parts = [fresh.length && `${fresh.length} found place${fresh.length === 1 ? '' : 's'}`, ticks.length && `${ticks.length} checklist tick${ticks.length === 1 ? '' : 's'}`,
+        newTodos.length && `${newTodos.length} to-do item${newTodos.length === 1 ? '' : 's'}`].filter(Boolean);
       alert(parts.length ? `Added ${parts.join(' and ')}.` : 'Nothing new: all of that was already marked.');
     });
     $('#pgReset').addEventListener('click', () => {
@@ -1107,7 +1131,10 @@
     pane.style.zIndex = 350;                        // above the base map, below every pin
     pane.style.pointerEvents = 'none';
     S.rangeLayer = L.layerGroup();
-    $('#rangePanel').addEventListener('click', (e) => { const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, true); });
+    $('#rangePanel').addEventListener('click', (e) => {
+      const sp = e.target.closest('[data-spots]'); if (sp) { pickHuntAnimal(sp.dataset.spots, { fit: true }); return; }
+      const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, true);
+    });
   }
 
   // The detailed ranges (outlines + 4-unit grids) live in their own file, fetched the first
@@ -1366,6 +1393,8 @@
       note = sp.cells ? `${esc(t.title)}: from the guide's habitat map, p. ${sp.page}.${sp.guarma ? ' Also found on Guarma.' : ''}`
         : `The guide only maps the ${esc(t.title)} on Guarma, which isn't part of this map.`;
       note += ` <button class="textbtn" type="button" data-topic="${esc(key)}">Read topic</button>`;
+      const spots = huntSpots(key).length;
+      if (spots) note += ` · <button class="textbtn" type="button" data-spots="${esc(key)}">Best spots (${spots})</button>`;
     }
     $('#rpNote').innerHTML = note;
     history.replaceState(null, '', '#range=' + encodeURIComponent(key));
@@ -1374,7 +1403,7 @@
       const bottom = desktop.matches ? 24 : $('#mapBottom').offsetHeight + 24;
       // A range spanning nearly the whole map would shrink to a strip on a phone: start on the main landmass instead.
       if (!desktop.matches && S.map.getBoundsZoom(res.bounds, false, L.point(32, 70 + bottom)) < -1.5) { homeView(); return; }
-      S.map.fitBounds(res.bounds, { paddingTopLeft: [16, 70], paddingBottomRight: [16, bottom], maxZoom: -0.5 });
+      S.map.fitBounds(res.bounds, { paddingTopLeft: [16, 70], paddingBottomRight: [16 + todoCover(), bottom], maxZoom: -0.5 });
     });
   }
 
@@ -1387,7 +1416,7 @@
     if (location.hash.startsWith('#range=')) history.replaceState(null, '', location.pathname + location.search);
   }
 
-  function setHits(list) {
+  function setHits(list, label) {
     if (!S.hitLayer) return;
     S.hitLayer.clearLayers();
     S.hits = list;
@@ -1397,10 +1426,10 @@
     const bar = $('#mapHits');
     if (list.length) {
       bar.hidden = false;
-      bar.innerHTML = `<span><b>${list.length}</b> matching place${list.length === 1 ? '' : 's'} glowing</span><button type="button" data-fit>Fit</button><button type="button" data-clear>Clear</button>`;
+      bar.innerHTML = `<span>${label ? esc(label) : `<b>${list.length}</b> matching place${list.length === 1 ? '' : 's'} glowing`}</span><button type="button" data-fit>Fit</button><button type="button" data-clear>Clear</button>`;
       bar.onclick = (e) => {
         if (e.target.closest('[data-fit]')) fitHits();
-        if (e.target.closest('[data-clear]')) { setHits([]); }
+        if (e.target.closest('[data-clear]')) { setHits([]); if (S.huntFilter) pickHuntAnimal(null); }
       };
     } else bar.hidden = true;
   }
@@ -1411,8 +1440,8 @@
     for (const p of S.hits) ensureLayer(p.type);
     requestAnimationFrame(() => {
       ensureView();
-      if (S.hits.length === 1) S.map.setView(ll(S.hits[0]), 0);
-      else S.map.fitBounds(L.latLngBounds(S.hits.map(ll)).pad(0.25), { maxZoom: 0 });
+      if (S.hits.length === 1) centerBesideCard(S.hits[0], 0, true);
+      else S.map.fitBounds(L.latLngBounds(S.hits.map(ll)).pad(0.25), { paddingBottomRight: [todoCover(), 0], maxZoom: 0 });
     });
   }
 
@@ -1433,13 +1462,363 @@
   function centerBesideCard(p, zoom, animate) {
     const card = $('#placeCard');
     const size = S.map.getSize();
-    let dx = 0, dy = 0;
+    let dx = todoCover() / 2, dy = 0;
     if (!card.hidden) {
-      if (desktop.matches) dx = Math.min(card.offsetWidth + 14, size.x * 0.6) / 2;
+      const cw = card.offsetWidth + 14;                 // beside the to-do list when there's room, over it when not
+      if (desktop.matches) dx = Math.min($('#layout').classList.contains('todo-room') ? cw + todoCover() : Math.max(cw, todoCover()), size.x * 0.6) / 2;
       else dy = Math.min(card.offsetHeight + 8, size.y * 0.6) / 2;
     }
     const pt = S.map.project(ll(p), zoom).add([dx, dy]);
     S.map.setView(S.map.unproject(pt, zoom), zoom, { animate });
+  }
+
+  // Hunting spots listed under each animal (topic id -> spots), for the range panel's "Best spots".
+  function huntSpots(topic) {
+    if (!S.huntBy) {
+      S.huntBy = new Map();
+      for (const p of S.data.places) if (p.type === 'hunt') for (const t of p.topics || []) {
+        if (!S.huntBy.has(t)) S.huntBy.set(t, []);
+        S.huntBy.get(t).push(p);
+      }
+    }
+    return S.huntBy.get(topic) || [];
+  }
+
+  // Show an animal's best spots: hunting layer on, the spots glowing, and the map fitted to them.
+  function showSpots(topic) {
+    const list = huntSpots(topic); if (!list.length) return;
+    ensureLayer('hunt');
+    setHits(list);
+    fitHits();
+  }
+
+  /* ---------- to-do list (right side of the map) ----------
+     Type what you need ("2 perfect deer pelt"); matching suggestions pop up as you type, and the
+     pick becomes an item with one tick box per piece. Saved in this browser (campfire:todo). */
+  const NUM_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20, thirty: 30 };
+  const SMALL_GAME = new Set(['animal-rabbit', 'animal-squirrel', 'animal-rat', 'animal-chipmunk', 'animal-opossum', 'animal-skunk', 'animal-bat',
+    'animal-muskrat', 'animal-raccoon', 'animal-armadillo']);
+  S.todo = store.get('todo', []);
+  const saveTodo = () => store.set('todo', S.todo);
+
+  // Everything the list can suggest: perfect pelts / carcasses / skins, legendary pelts, feathers,
+  // exotics, herbs and orchids. Each entry knows which animal or plant it belongs to.
+  function todoCatalog() {
+    if (S.todoCat) return S.todoCat;
+    const out = [], seen = new Set();
+    const add = (label, kind, extra = {}) => { const k = label.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push({ label, kind, ...extra }); } };
+    const clean = (t) => { const m = t.match(/^(.*?)\s*\((.*?)\)$/); return m ? `${m[2]} ${m[1]}` : t; };
+    for (const sp of S.data.ranges?.species || []) {
+      if (sp.kind === 'plant') { add(sp.name, 'herb', { topic: sp.topic }); continue; }
+      if (sp.group === 'Livestock' || sp.group === 'Other' || !sp.cells && !huntSpots(sp.topic).length) continue;    // Guarma-only animals
+      const name = clean(S.topics.get(sp.topic)?.title || sp.topic), t = sp.topic;
+      if (sp.group === 'Birds') { add(`Perfect ${name} carcass`, 'carcass', { topic: t }); add(`${name} feathers`, 'feathers', { topic: t }); }
+      else if (sp.group === 'Reptiles & amphibians') { const c = /frog|toad|turtle/i.test(name); add(`Perfect ${name} ${c ? 'carcass' : 'skin'}`, c ? 'carcass' : 'skin', { topic: t }); }
+      else { add(`Perfect ${name} pelt`, 'pelt', { topic: t }); if (SMALL_GAME.has(t)) add(`Perfect ${name} carcass`, 'carcass', { topic: t }); }
+    }
+    for (const p of S.data.places) if (p.type === 'legendary') add(`${p.name} pelt`, 'legendary', { place: p.id });
+    for (const [label, t] of [['Egret plume', 'animal-egret'], ['Heron plume', 'animal-heron'], ['Spoonbill plume', 'animal-spoonbill']]) add(label, 'exotic', { topic: t });
+    add('Gator egg', 'exotic', { layer: 'gator-egg' });
+    for (const p of S.data.places) if (p.type === 'orchid') add(p.name.split(' #')[0].replace(/\s*\(.*\)$/, ''), 'orchid', { layer: 'orchid' });
+    S.todoCat = out;
+    return out;
+  }
+
+  // "2 perfect deer pelts" -> { qty: 2, words: ['perfect', 'deer', 'pelt'], rest: 'perfect deer pelts' }
+  // The amount can lead ("2 …", "two …") or trail ("… x2", "… ×2").
+  function parseTodo(text) {
+    let qty = 1, rest = text.trim().replace(/^(?:i\s+)?(?:need|want|get|collect|find)\s+(?=\S)/i, '');
+    const lead = rest.match(/^(?:[×x]\s*)?(\d+|[a-z]+)\s*[×x]?\s+(?=\S)/i);
+    const trail = rest.match(/\s+[×x]\s*(\d+)$|\s+(\d+)$/i);
+    if (lead && (/^\d+$/.test(lead[1]) || NUM_WORDS[lead[1].toLowerCase()])) {
+      qty = /^\d+$/.test(lead[1]) ? parseInt(lead[1], 10) : NUM_WORDS[lead[1].toLowerCase()];
+      rest = rest.slice(lead[0].length);
+    } else if (trail) { qty = parseInt(trail[1] || trail[2], 10); rest = rest.slice(0, trail.index); }
+    const words = rest.toLowerCase().split(/[^a-z0-9']+/).filter((w) => w && !['of', 'the', 'need', 'i', 'get'].includes(w))
+      .map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
+    return { qty: Math.max(1, Math.min(qty || 1, 99)), words, rest: rest.trim() };
+  }
+
+  function todoMatches(text) {
+    const { qty, words } = parseTodo(text);
+    if (!words.length) return { qty, list: [] };
+    const scored = [];
+    for (const c of todoCatalog()) {
+      const lw = c.label.toLowerCase().split(/[^a-z0-9']+/).filter(Boolean);
+      let ok = true, score = 0;
+      for (const w of words) {
+        const i = lw.findIndex((x) => x.startsWith(w) || (w.length > 3 && x.startsWith(w.slice(0, -1))));
+        if (i === -1) { ok = false; break; }
+        score += i;
+      }
+      if (ok) scored.push({ c, score: score + c.label.length / 40 });
+    }
+    scored.sort((a, b) => a.score - b.score);
+    return { qty, list: scored.slice(0, 7).map((s) => s.c) };
+  }
+
+  function initTodo() {
+    const q = $('#tdQ'), sugg = $('#tdSugg');
+    setTodoOpen(store.get('todoOpen', false), false);
+    $('#todoToggle').addEventListener('click', () => setTodoOpen(!$('#layout').classList.contains('todo-open'), true));
+    $('#tdClose').addEventListener('click', () => setTodoOpen(false, true));
+    let active = -1, last = null;
+    const show = () => {
+      const v = q.value; if (v === last) return; last = v;
+      const { qty, list } = todoMatches(v);
+      active = -1;
+      if (!v.trim()) { sugg.hidden = true; sugg.innerHTML = ''; return; }
+      const { words, rest: custom } = parseTodo(v);
+      const mark = (label) => esc(label).replace(new RegExp(`\\b(${words.map((w) => w.replace(/[^a-z0-9']/g, '')).filter(Boolean).join('|')})`, 'gi'), '<mark>$1</mark>');
+      sugg.innerHTML = list.map((c, i) => `<button type="button" class="td-opt" role="option" data-i="${i}">${qty > 1 ? `<span class="td-qty">${qty}×</span>` : ''}<span>${mark(c.label)}</span><span class="td-kind">${esc(c.kind)}</span></button>`).join('')
+        + (custom ? `<button type="button" class="td-opt" role="option" data-custom="1">${qty > 1 ? `<span class="td-qty">${qty}×</span>` : ''}<span>Add “${esc(custom)}”</span><span class="td-kind">own item</span></button>` : '');
+      sugg.hidden = !sugg.innerHTML;
+      S.todoSugg = { qty, list, custom };
+    };
+    const choose = (el) => {
+      if (!el || !S.todoSugg) return;
+      const { qty, list, custom } = S.todoSugg;
+      if (el.dataset.custom) addTodo({ text: custom, kind: 'own' }, qty);
+      else { const c = list[+el.dataset.i]; addTodo({ text: c.label, kind: c.kind, topic: c.topic, place: c.place, layer: c.layer }, qty); }
+      q.value = ''; last = null; show(); q.focus();
+    };
+    for (const ev of ['input', 'keyup', 'compositionend']) q.addEventListener(ev, () => setTimeout(show, 0));
+    q.addEventListener('keydown', (e) => {
+      const opts = $$('.td-opt', sugg);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!opts.length) return; e.preventDefault();
+        active = (active + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length;
+        opts.forEach((o, i) => o.classList.toggle('is-active', i === active));
+      } else if (e.key === 'Enter') { e.preventDefault(); choose(opts[active >= 0 ? active : 0]); }
+      else if (e.key === 'Escape') { q.value = ''; show(); }
+    });
+    sugg.addEventListener('mousedown', (e) => e.preventDefault());       // keep the keyboard up while choosing
+    sugg.addEventListener('click', (e) => choose(e.target.closest('.td-opt')));
+    q.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== q) sugg.hidden = true; }, 150));
+    q.addEventListener('focus', () => { last = null; show(); });
+    $('#tdList').addEventListener('click', (e) => {
+      const li = e.target.closest('.td-item'); if (!li) return;
+      const t = S.todo.find((x) => x.id === li.dataset.id); if (!t) return;
+      const box = e.target.closest('[data-box]');
+      if (box) { const i = +box.dataset.box; t.got = t.got > i ? i : i + 1; return todoChanged(); }
+      const step = e.target.closest('[data-step]');
+      if (step) { t.got = Math.max(0, Math.min(t.qty, t.got + +step.dataset.step)); return todoChanged(); }
+      const need = e.target.closest('[data-need]');                    // how many are needed; ticks never exceed it
+      if (need) { t.qty = Math.max(1, Math.min(99, t.qty + +need.dataset.need)); t.got = Math.min(t.got, t.qty); return todoChanged(); }
+      if (e.target.closest('[data-del]')) { S.todo = S.todo.filter((x) => x !== t); return todoChanged(); }
+      if (e.target.closest('[data-spots]')) { if (!desktop.matches) setTodoOpen(false, false); pickHuntAnimal(t.topic, { fit: true }); if (desktop.matches) setPanelOpen(true, false); return; }
+      if (e.target.closest('[data-range]')) { if (!desktop.matches) setTodoOpen(false, false); showRange(t.topic, { fit: true }); return; }
+      if (e.target.closest('[data-place]')) { if (!desktop.matches) setTodoOpen(false, false); showPlace(t.place, true); return; }
+      if (e.target.closest('[data-layer]')) { if (!desktop.matches) setTodoOpen(false, false); ensureLayer(t.layer); fitLayer(t.layer); }
+    });
+    $('#tdClearDone').addEventListener('click', () => { S.todo = S.todo.filter((t) => t.got < t.qty); todoChanged(); });
+    window.addEventListener('storage', (e) => { if (e.key === 'campfire:todo') { S.todo = store.get('todo', []); renderTodo(); } });
+    // room for the place card beside the list? (iPad landscape yes, portrait with the sidebar open no)
+    const mv = $('#mapView');
+    const roomy = () => $('#layout').classList.toggle('todo-room', desktop.matches && mv.clientWidth >= 720);
+    if (window.ResizeObserver) new ResizeObserver(roomy).observe(mv); else window.addEventListener('resize', roomy);
+    roomy();
+    renderTodo();
+  }
+
+  // An item from an imported file: keep only what the list understands.
+  function cleanTodo(t) {
+    const qty = Math.max(1, Math.min(99, parseInt(t.qty, 10) || 1));
+    return {
+      id: t.id.slice(0, 40), text: t.text.slice(0, 120), qty, got: Math.max(0, Math.min(qty, parseInt(t.got, 10) || 0)),
+      kind: typeof t.kind === 'string' ? t.kind.slice(0, 20) : 'own',
+      topic: S.topics.has(t.topic) ? t.topic : undefined,
+      place: S.places.has(t.place) ? t.place : undefined,
+      layer: ['orchid', 'gator-egg'].includes(t.layer) ? t.layer : undefined,
+    };
+  }
+
+  function addTodo(item, qty) {
+    const same = S.todo.find((t) => t.text.toLowerCase() === item.text.toLowerCase() && t.got < t.qty);
+    if (same) same.qty = Math.min(99, same.qty + qty);                // "2 deer pelts" again adds to the open item
+    else S.todo.unshift({ id: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), qty, got: 0, ...item });
+    todoChanged();
+  }
+
+  function todoChanged() { saveTodo(); keepStorage(); renderTodo(); }
+
+  function renderTodo() {
+    const list = $('#tdList');
+    const open = S.todo.filter((t) => t.got < t.qty), done = S.todo.filter((t) => t.got >= t.qty);
+    const tick = TICK;
+    list.innerHTML = [...open, ...done].map((t) => {
+      const finished = t.got >= t.qty;
+      const boxes = t.qty <= 8
+        ? Array.from({ length: t.qty }, (_, i) => `<button type="button" class="td-box" data-box="${i}" aria-pressed="${i < t.got}" aria-label="${i + 1} of ${t.qty}">${tick}</button>`).join('') + (t.qty > 1 ? `<span class="td-count">${t.got}/${t.qty}</span>` : '')
+        : `<span class="td-got">Got</span><button type="button" class="td-step" data-step="-1" aria-label="Got one less">−</button><span class="td-count">${t.got}/${t.qty}</span><button type="button" class="td-step" data-step="1" aria-label="Got one more">+</button>`;
+      const links = [];
+      if (t.topic && huntSpots(t.topic).length) links.push(`<button type="button" data-spots>Best spots (${huntSpots(t.topic).length})</button>`);
+      if (t.topic && S.ranges?.has(t.topic)) links.push(`<button type="button" data-range>${t.kind === 'herb' ? 'Where it grows' : 'Range'}</button>`);
+      if (t.place) links.push('<button type="button" data-place>On the map</button>');
+      if (t.layer) links.push(`<button type="button" data-layer>Show ${t.layer === 'orchid' ? 'orchids' : 'nests'}</button>`);
+      return `<li class="td-item${finished ? ' is-done' : ''}" data-id="${esc(t.id)}">
+        <div class="td-row"><span class="td-name">${esc(t.text)}</span>
+          <span class="td-need" title="How many you need"><button type="button" data-need="-1" aria-label="Need one less"${t.qty <= 1 ? ' disabled' : ''}>−</button><b aria-label="Need ${t.qty}">×${t.qty}</b><button type="button" data-need="1" aria-label="Need one more"${t.qty >= 99 ? ' disabled' : ''}>+</button></span>
+          <button type="button" class="td-del" data-del aria-label="Remove">${ICONS.close}</button></div>
+        <div class="td-boxes">${boxes}</div>
+        ${links.length && !finished ? `<div class="td-links">${links.join('')}</div>` : ''}
+      </li>`;
+    }).join('');
+    $('#tdEmpty').hidden = S.todo.length > 0;
+    $('#tdClearDone').hidden = !done.length;
+    $('#tdLeft').textContent = S.todo.length ? `${open.length} left` : '';
+    const badge = $('#todoBadge'); badge.hidden = !open.length; badge.textContent = open.length;
+  }
+
+  // How much of the map's right side an open to-do list hides (it closes itself on phones before the map moves).
+  const todoCover = () => (desktop.matches && !$('#todo').hidden ? $('#todo').offsetWidth : 0);
+
+  function setTodoOpen(open, save) {
+    $('#layout').classList.toggle('todo-open', open);
+    $('#todo').hidden = !open;
+    const b = $('#todoToggle');
+    b.setAttribute('aria-expanded', String(open));
+    b.setAttribute('aria-label', open ? 'Hide the to-do list' : 'Show the to-do list');
+    if (save) store.set('todoOpen', open);
+  }
+
+  // Fit the map to every pin of a layer (orchids, gator eggs).
+  function fitLayer(type) {
+    const pts = S.data.places.filter((p) => p.type === type && p.x != null);
+    if (!pts.length) return;
+    if (!desktop.matches) setView('map');
+    S.map.fitBounds(L.latLngBounds(pts.map(ll)), { paddingTopLeft: [40, 40], paddingBottomRight: [40 + todoCover(), 40], maxZoom: -0.5 });
+  }
+
+  /* ---------- hunting spot finder (map tab) ----------
+     Type or tap an animal: only its pins stay on the map, glowing, the map fits them, and the
+     sidebar lists its spots (best confirmed first) to tap straight to one. */
+  const HUNT_ALIAS = { 'animal-bear': 'grizzly', 'animal-black-bear': 'bear', 'animal-ram': 'bighorn sheep', 'animal-buck': 'deer whitetail',
+    'animal-deer': 'doe whitetail', 'animal-pheasant': 'prairie chicken', 'animal-songbird': 'tanager', 'animal-waxwing': 'cedar',
+    'animal-opossum': 'possum', 'animal-cardinal': 'northern', 'animal-parakeet': 'carolina', 'animal-gila-monster': 'lizard', 'animal-iguana': 'lizard' };
+  const POPULAR = ['animal-cougar', 'animal-wolf', 'animal-panther', 'animal-bear', 'animal-black-bear', 'animal-moose', 'animal-elk', 'animal-bison',
+    'animal-badger', 'animal-beaver', 'animal-skunk', 'animal-owl'];
+
+  function huntAnimals() {
+    if (!S.huntList) {
+      huntSpots('');                                         // builds S.huntBy
+      S.huntList = [...S.huntBy.keys()].map((topic) => ({ topic, name: S.topics.get(topic)?.title || topic, alias: HUNT_ALIAS[topic] || '', n: S.huntBy.get(topic).length }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return S.huntList;
+  }
+
+  function initHuntFinder() {
+    const q = $('#hfQ');
+    $('#hfSub').textContent = `${S.data.places.filter((p) => p.type === 'hunt').length} spots · ${huntAnimals().length} animals`;
+    // Any edit to the box (typing, deleting, the keyboard's clear, autocorrect) re-runs the suggestions;
+    // typing while an animal is picked starts a new search.
+    let last = null;
+    const onEdit = () => {
+      const v = q.value;
+      if (v === last) return;
+      last = v;
+      S.hfAll = false;
+      if (S.huntFilter && v.trim()) pickHuntAnimal(null, { keepText: true });
+      renderHuntAnimals();
+    };
+    for (const ev of ['input', 'search', 'keyup', 'change', 'compositionend']) q.addEventListener(ev, () => setTimeout(onEdit, 0));
+    q.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { const first = $('#hfAnimals [data-pick]'); if (first) { e.preventDefault(); pickHuntAnimal(first.dataset.pick, { fit: true }); } }
+      if (e.key === 'Escape') { q.value = ''; onEdit(); }
+    });
+    $('#hfClear').addEventListener('click', () => { q.value = ''; onEdit(); q.focus(); });
+    $('#huntFinder').addEventListener('click', (e) => {
+      const a = e.target.closest('[data-pick]'); if (a) { pickHuntAnimal(a.dataset.pick, { fit: true }); return; }
+      if (e.target.closest('.hf-more')) { S.hfAll = true; renderHuntAnimals(); return; }
+      const sp = e.target.closest('[data-spot]'); if (sp) { showPlace(sp.dataset.spot, true); return; }
+      if (e.target.closest('[data-hf-fit]')) { if (!desktop.matches) setDrawer(false); fitHits(); return; }
+      if (e.target.closest('[data-hf-range]')) { showRange(S.huntFilter, { fit: true }); setDrawer(false); return; }
+      if (e.target.closest('[data-hf-clear]')) pickHuntAnimal(null);
+    });
+    renderHuntAnimals();
+  }
+
+  function renderHuntAnimals() {
+    const box = $('#hfAnimals'), q = $('#hfQ').value.trim().toLowerCase();
+    $('#hfClear').hidden = !$('#hfQ').value;
+    if (S.huntFilter) { box.hidden = true; return; }
+    box.hidden = false;
+    const all = huntAnimals();
+    let list = q ? all.filter((a) => (a.name + ' ' + a.alias).toLowerCase().split(/[^a-z]+/).some((w) => w.startsWith(q)) || a.name.toLowerCase().includes(q)) : null;
+    const chip = (a) => `<button type="button" class="chip" data-pick="${esc(a.topic)}">${esc(a.name)}<span class="n">${a.n}</span></button>`;
+    if (list) box.innerHTML = list.length ? list.map(chip).join('') : `<p class="hf-empty">No hunting spots for “${esc(q)}” yet. Try its range instead.</p>`;
+    else if (S.hfAll) box.innerHTML = all.map(chip).join('');
+    else box.innerHTML = POPULAR.map((t) => all.find((a) => a.topic === t)).filter(Boolean).map(chip).join('')
+      + `<button type="button" class="chip hf-more">All ${all.length} animals</button>`;
+  }
+
+  // Pick an animal (topic id) or null to show every spot again.
+  function pickHuntAnimal(topic, opts = {}) {
+    const spots = topic ? huntSpots(topic) : [];
+    if (topic && !spots.length) return;
+    S.huntFilter = topic || null;
+    // the box starts empty again after a pick or "All animals", so the suggestions match what it shows
+    if (!opts.keepText) $('#hfQ').value = '';
+    const grp = S.layerGroups.get('hunt');
+    for (const p of S.data.places) {
+      if (p.type !== 'hunt') continue;
+      const mk = S.markerOf.get(p.id); if (!mk) continue;
+      const on = !topic || (p.topics || []).includes(topic);
+      if (on && !grp.hasLayer(mk)) grp.addLayer(mk); else if (!on && grp.hasLayer(mk)) grp.removeLayer(mk);
+    }
+    const pick = $('#hfPick');
+    if (!topic) {
+      pick.hidden = true; pick.innerHTML = '';
+      setHits([]);
+      renderHuntAnimals();
+      if (location.hash.startsWith('#hunt=')) history.replaceState(null, '', location.pathname + location.search);
+      return;
+    }
+    ensureLayer('hunt');
+    const rank = { many: 0, some: 1, guide: 2 };
+    const sorted = [...spots].sort((a, b) => (rank[a.conf] ?? 3) - (rank[b.conf] ?? 3));
+    const name = S.topics.get(topic)?.title || topic;
+    const conf = { many: 'many players confirm', some: 'a few confirm', guide: 'from guides' };
+    pick.hidden = false;
+    pick.innerHTML = `<div class="hf-pick-head"><b>${esc(name)}</b><span class="mono">${spots.length} spot${spots.length === 1 ? '' : 's'}</span>
+        <button type="button" class="textbtn" data-hf-clear>All animals</button></div>
+      <ul class="hf-list">${sorted.map((p) => `<li><button type="button" class="hf-spot" data-spot="${esc(p.id)}">
+        <span class="hf-dot ${CONF[p.conf]?.[1] || ''}"></span>
+        <span><span class="hf-spot-name">${esc(p.name.replace(/^[^:]*:\s*/, ''))}</span>
+        <span class="hf-spot-meta">${[conf[p.conf], p.when, p.epilogue ? 'Epilogue only' : ''].filter(Boolean).map(esc).join(' · ')}</span></span></button></li>`).join('')}</ul>
+      <div class="hf-actions"><button type="button" class="textbtn" data-hf-fit>Show on map</button>${S.ranges?.has(topic) ? '<button type="button" class="textbtn" data-hf-range>Show its range</button>' : ''}</div>`;
+    renderHuntAnimals();
+    setHits(spots, `${spots.length} ${name.toLowerCase()} spot${spots.length === 1 ? '' : 's'} glowing`);
+    history.replaceState(null, '', '#hunt=' + encodeURIComponent(topic));
+    if (opts.fit) {
+      if (desktop.matches) fitHits();
+      // phones: the list shows in the drawer; "Show on map" or a spot closes it
+    }
+  }
+
+  const CHECK = {
+    video: "Pin placed from the video's own map.",
+    spawns: "Pin placed on the game's spawn points for this animal.",
+    both: "Pin placed from the video's map, and the game's spawn points agree.",
+    place: 'Pin is on the building players name.',
+  };
+  const CONF = { many: ['Many players confirm it', 'conf-many'], some: ['A few players confirm it', 'conf-some'], guide: ['From guides (no player reports found)', 'conf-guide'] };
+
+  function huntDetails(p) {
+    const [label, cls] = CONF[p.conf] || CONF.guide;
+    const bits = [`<span class="hs-conf ${cls}">${esc(label)}</span>`];
+    if (p.when) bits.push(`<span class="hs-when">${ICONS.clock || ''}${esc(p.when)}</span>`);
+    if (p.epilogue) bits.push('<span class="hs-ep">Epilogue only</span>');
+    const animals = (p.topics || []).filter((t) => S.ranges?.has(t));
+    const name = (t) => S.topics.get(t)?.title || t;
+    return `<div class="hs">
+      <div class="hs-bits">${bits.join('')}</div>
+      ${p.video ? `<a class="hs-video" href="https://www.youtube.com/watch?v=${esc(p.video)}" target="_blank" rel="noopener">${ICONS.play}<span>Watch the spot in the video guide</span></a>` : ''}
+      ${animals.length ? `<div class="hs-ranges">${animals.map((t) => `<button type="button" class="chip" data-range="${esc(t)}">${esc(name(t))} range</button>`).join('')}</div>` : ''}
+      ${CHECK[p.check] ? `<p class="hs-check">${esc(CHECK[p.check])}</p>` : ''}
+      ${p.approx ? '<p class="hs-approx">Pin is approximate: the video shows the exact spot.</p>' : ''}
+    </div>`;
   }
 
   function openPlace(id) {
@@ -1457,7 +1836,8 @@
       <h2>${esc(p.name)}</h2>
       ${trackable(p) ? '<button class="pc-found" type="button" aria-pressed="false"></button>' : ''}
       <p>${esc(p.description || '')}</p>
-      <div class="pc-src">${src}${p.approx ? '<span class="mono pc-approx">Approximate position</span>' : ''}</div>
+      ${p.type === 'hunt' ? huntDetails(p) : ''}
+      <div class="pc-src">${src}${p.approx && p.type !== 'hunt' ? '<span class="mono pc-approx">Approximate position</span>' : ''}</div>
       ${related.length ? `<div class="pc-topics"><h3>In the guide</h3>${related.map((tp) => `<button class="pc-link" type="button" data-topic="${esc(tp.id)}"><span>${esc(tp.title)}</span><span>${pageLabel(tp)}</span></button>`).join('')}</div>` : ''}`;
     card.hidden = false;
     card.scrollTop = 0;
@@ -1465,6 +1845,7 @@
     renderFoundBtn(p);
     card.onclick = (e) => {
       if (e.target.closest('.pc-found')) { toggleFound(p.id); return; }
+      const r = e.target.closest('[data-range]'); if (r) { showRange(r.dataset.range, { fit: true }); return; }
       const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, true);
     };
     history.replaceState(null, '', '#place=' + encodeURIComponent(id));
@@ -1522,6 +1903,7 @@
     else if (k === 'place' && v) showPlace(v, false);
     else if (k === 'range' && v) showRange(v, { fit: true });
     else if (k === 'hundred') openHundred(v);
+    else if (k === 'hunt' && v) { if (!desktop.matches) setDrawer(true); pickHuntAnimal(v, { fit: true }); }
   }
 
   function copyLink(kind, id, btn) {
