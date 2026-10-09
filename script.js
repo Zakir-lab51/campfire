@@ -631,7 +631,6 @@
       L.imageOverlay(m.image, bounds, { className: 'base-map', pane: 'base' }).addTo(map);
     }
     L.control.zoom({ position: 'bottomright' }).addTo(map);
-    if (m.credit) L.control.attribution({ position: 'topright', prefix: false }).addAttribution(esc(m.credit)).addTo(map);
     S.homeBounds = bounds;
     homeView();
     // The container may get its final size after fonts/header settle; refit once it has.
@@ -1439,6 +1438,7 @@
     if (!desktop.matches) setView('map');
     for (const p of S.hits) ensureLayer(p.type);
     requestAnimationFrame(() => {
+      if (!S.hits?.length) return;                    // cleared before the frame came round
       ensureView();
       if (S.hits.length === 1) centerBesideCard(S.hits[0], 0, true);
       else S.map.fitBounds(L.latLngBounds(S.hits.map(ll)).pad(0.25), { paddingBottomRight: [todoCover(), 0], maxZoom: 0 });
@@ -1606,7 +1606,7 @@
       const need = e.target.closest('[data-need]');                    // how many are needed; ticks never exceed it
       if (need) { t.qty = Math.max(1, Math.min(99, t.qty + +need.dataset.need)); t.got = Math.min(t.got, t.qty); return todoChanged(); }
       if (e.target.closest('[data-del]')) { S.todo = S.todo.filter((x) => x !== t); return todoChanged(); }
-      if (e.target.closest('[data-spots]')) { if (!desktop.matches) setTodoOpen(false, false); pickHuntAnimal(t.topic, { fit: true }); if (desktop.matches) setPanelOpen(true, false); return; }
+      if (e.target.closest('[data-spots]')) { if (!desktop.matches) setTodoOpen(false, false); pickHuntAnimal(t.topic, { fit: true }); return; }
       if (e.target.closest('[data-range]')) { if (!desktop.matches) setTodoOpen(false, false); showRange(t.topic, { fit: true }); return; }
       if (e.target.closest('[data-place]')) { if (!desktop.matches) setTodoOpen(false, false); showPlace(t.place, true); return; }
       if (e.target.closest('[data-layer]')) { if (!desktop.matches) setTodoOpen(false, false); ensureLayer(t.layer); fitLayer(t.layer); }
