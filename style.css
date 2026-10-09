@@ -152,6 +152,16 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
   font: 700 14px var(--f-ui); color: var(--ink); -webkit-user-select: none; user-select: none;
 }
 .map-fab svg { width: 18px; height: 18px; }
+/* wide screens: a tab on the map's left edge folds the side panel away for a full-screen map */
+.panel-toggle {
+  display: none; position: absolute; z-index: 650; top: 14px; left: 0;
+  width: 26px; height: 54px; place-items: center; padding: 0;
+  border: 1px solid var(--line-2); border-left: 0; border-radius: 0 10px 10px 0;
+  background: var(--panel); color: var(--ink); box-shadow: var(--shadow);
+}
+.panel-toggle:hover { color: var(--ember); }
+.panel-toggle svg { width: 18px; height: 18px; stroke-width: 2.2; transition: transform .28s var(--ease); }
+.app.panel-collapsed .panel-toggle svg { transform: rotate(180deg); }
 
 /* ---------- sidebar: map categories ---------- */
 .sb-map { padding: 6px 16px 24px; }
@@ -295,7 +305,7 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
 .foot { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line-2); color: var(--ink-dim); font-size: 13px; }
 .noscript { padding: 20px; text-align: center; }
 
-/* ---------- leaflet: controls, pins, labels ---------- */
+/* ---------- leaflet: controls, pins ---------- */
 .leaflet-container { font-family: var(--f-ui); background: #c3ad85; }
 .leaflet-control-zoom { border: 1px solid var(--line-2) !important; border-radius: 10px !important; overflow: hidden; box-shadow: var(--shadow) !important; }
 .leaflet-control-zoom a { width: 40px !important; height: 40px !important; line-height: 40px !important; background: var(--panel) !important; color: var(--ink) !important; border-bottom-color: var(--line) !important; }
@@ -319,24 +329,6 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
 @keyframes pulse { 0% { transform: scale(.55); opacity: 1; } 100% { transform: scale(1.25); opacity: 0; } }
 .grid-label { font: 500 11px var(--f-mono); color: rgba(42, 32, 24, .7); text-shadow: var(--halo); white-space: nowrap; }
 
-/* names on the map */
-.lbl { position: relative; }
-.lbl span { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); white-space: nowrap; text-shadow: var(--halo); cursor: pointer; }
-.lbl-state span { font: 800 23px/1 var(--f-head); letter-spacing: .5em; text-transform: uppercase; color: rgba(74, 54, 36, .5); text-shadow: none; cursor: default; padding-left: .5em; }
-.lbl-area span { font: 700 11.5px/1 var(--f-head); letter-spacing: .3em; text-transform: uppercase; color: rgba(74, 54, 36, .78); padding-left: .3em; }
-.lbl-town span { font: 800 14px/1 var(--f-head); letter-spacing: .06em; text-transform: uppercase; color: #22190f; }
-.lbl-water span { font: italic 600 12.5px/1 var(--f-head); color: #2b4a52; }
-.lbl-landmark span, .lbl-camp span { font: 600 11px/1 var(--f-ui); color: #3a2c1f; }
-.lbl-town span, .lbl-landmark span, .lbl-camp span { top: 9px; }      /* just below the pin's tip */
-.lbl span:hover { color: var(--ember); }
-.map[data-z="far"] :is(.lbl-area, .lbl-water, .lbl-landmark, .lbl-camp) { display: none; }
-.map[data-z="far"] .lbl-town span { font-size: 11.5px; }
-.map[data-z="mid"] :is(.lbl-landmark, .lbl-camp) { display: none; }
-.map[data-z="mid"] .lbl-state span { font-size: 19px; color: rgba(74, 54, 36, .32); }
-.map:is([data-z="near"], [data-z="close"]) .lbl-state { display: none; }
-.lbl-minor span { font: 600 10.5px/1 var(--f-ui); color: #4a3a2a; top: 8px; }
-.map:not([data-z="close"]) .lbl-minor { display: none; }
-.map.no-labels .lbl:not(.lbl-state) { display: none; }
 
 /* ---------- wide screens: sidebar + map ---------- */
 @media (min-width: 560px) {
@@ -363,6 +355,10 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
   .map-bottom { right: auto; width: 380px; }
   .placecard { left: auto; right: 14px; top: 14px; bottom: auto; width: 360px; max-height: calc(100% - 90px); }
   .placecard .grab { display: none; }
+  .panel-toggle { display: grid; }
+  .app { transition: grid-template-columns .28s var(--ease); }
+  .app.panel-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  .app.panel-collapsed :is(.topbar, .sidebar) { overflow: hidden; visibility: hidden; transition: visibility 0s .28s; }
 }
 
 @media (prefers-reduced-motion: reduce) {

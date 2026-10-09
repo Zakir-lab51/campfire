@@ -5,7 +5,7 @@ Facts and summaries are written in our own words, and every topic shows the guid
 
 - **Search** (Fuse.js): fuzzy, typo-tolerant search across every topic and place, with live results.
 - **Map** (Leaflet, `CRS.Simple`): Jotrius's J10 Railroad Engineer map of RDR2, used with permission. It's lined up with the guide's atlas positions and carries 800 teardrop pins, each showing a picture of its category.
-- **Categories sidebar**: every pin category grouped with counts, plus *Show all* / *Hide all*, place names and the atlas grid. On phones it opens as a drawer from the *Categories* button.
+- **Categories sidebar**: every pin category grouped with counts, plus *Show all* / *Hide all* and the atlas grid. On wide screens, a tab on the map's left edge folds the panel away for a full-screen map. On phones it opens as a drawer from the *Categories* button.
 - **Animal ranges**: where each of the 76 Field Guide species lives, shown as red patches the way the guide's habitat maps (pp. 149–161) mark them. The "all animals", mammal, bird, reptile and livestock views show red dots instead, bigger where more species overlap. Open them from the map's *Animal ranges* chip, an animal topic's *Range on map* button, or by searching a species name.
 - **Browse**: contents, collapsible chapters and category filters.
 
@@ -29,7 +29,6 @@ The page loads `data.json` with `fetch`, so it must be served over HTTP. Opening
   - In `text`, `\n` starts a new line, `- ` makes a bullet, `1. ` makes a numbered step, a short line ending in `:` becomes a small heading, and `Tip:` makes a callout.
 - `places[]`: `id`, `name`, `type`, `description`, `topics` (topic ids), `x`/`y` in map units (the 2240 × 1680 space, top-left origin; `null` = not on the map), `cell` and `atlasPage`. `approx: true` shows an "Approximate position" note.
 - `categories`, `layers` (the sidebar's pin categories; `default: true` = on at first load) and `quickSearch` (the chips under the search bar).
-- `map.states`: the five state names drawn on the map (`name`, `x`, `y`). Towns, regions, rivers, lakes, camps and landmarks are labelled from `places`.
 - `ranges`: animal habitat grids. The map is split into `cols` × `rows` cells of `cell` map units (140 × 105 cells of 16 units). Each entry in `species` has:
   - `topic`: the animal topic it belongs to
   - `group`: Mammals, Birds, Reptiles & amphibians, Livestock or Other

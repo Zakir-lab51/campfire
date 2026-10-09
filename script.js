@@ -66,23 +66,20 @@
     letter: '<rect x="3" y="6" width="18" height="12.5" rx="1"/><path d="M3 7l9 6.2L21 7"/>',
     flower: '<circle cx="12" cy="6.6" r="2.7"/><circle cx="7.4" cy="10.2" r="2.7"/><circle cx="16.6" cy="10.2" r="2.7"/><circle cx="9.2" cy="15.6" r="2.7"/><circle cx="14.8" cy="15.6" r="2.7"/><circle class="f" cx="12" cy="11.2" r="1.9"/>',
     egg: '<path d="M12 3c3.5 0 6 5.6 6 10.2a6 6 0 0 1-12 0C6 8.6 8.5 3 12 3z"/>',
-    names: '<path d="M5 19L11 5h2l6 14M7.6 13.5h8.8"/>',
     grid: '<path d="M4 4h16v16H4zM4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16"/>',
   };
   const glyph = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[name] || GLYPHS.excl}</svg>`;
   const PIN = 'M14 35C12.6 29.5 2 22.5 2 13a12 12 0 0 1 24 0c0 9.5-10.6 16.5-12 22z';
   const pinHtml = (color, g) => `<span class="pin" style="--c:${color}"><svg class="body" viewBox="0 0 28 36" aria-hidden="true"><path d="${PIN}"/></svg><span class="glyph">${glyph(g)}</span></span>`;
   const typePin = (type) => { const t = TYPES[type] || TYPES.landmark; return pinHtml(t.color, t.glyph); };
-  // Names drawn on the map, by place type (regions, rivers and lakes are names only, no pins).
-  const LABELLED = { town: 'town', area: 'area', water: 'water', landmark: 'landmark', camp: 'camp',
-    shack: 'minor', poi: 'minor', hideout: 'minor', shop: 'minor' };
+  // Regions, rivers and lakes get no pin: the base map already names them (they stay searchable).
   const NAME_ONLY = new Set(['area', 'water']);
   const CAT_GROUPS = [
     ['Places', ['town', 'camp', 'landmark', 'hideout', 'shack', 'poi', 'shop']],
     ['People & jobs', ['stranger', 'special', 'bounty', 'request']],
     ['Hunting & fishing', ['legendary', 'legendary-fish', ':ranges']],
     ['Collectibles', ['card', 'bone', 'carving', 'dreamcatcher', 'treasure', 'chest', 'tonic', 'unique', 'orchid', 'gator-egg']],
-    ['On the map', [':labels', ':grid']],
+    ['On the map', [':grid']],
   ];
   const ICONS = {
     topic: '<svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M8 10h8M8 14h8M8 18h5"/></svg>',
@@ -99,7 +96,7 @@
     topics: new Map(), places: new Map(), sectionOf: new Map(), catColor: new Map(),
     activeCats: new Set(),
     map: null, H: 0, W: 0, layerGroups: new Map(), markerOf: new Map(), selected: null,
-    hitLayer: null, gridLayer: null, labelLayer: null, mapReady: false, view: 'map',
+    hitLayer: null, gridLayer: null, mapReady: false, view: 'map',
     results: [], activeResult: -1,
     ranges: null, range: null, rangeLayer: null,
   };
@@ -517,6 +514,8 @@
     $('#layersBtn').addEventListener('click', () => setDrawer(true));
     $('#drawerClose').addEventListener('click', () => setDrawer(false));
     $('#scrim').addEventListener('click', () => setDrawer(false));
+    $('#panelToggle').addEventListener('click', () => setPanelOpen($('#layout').classList.contains('panel-collapsed'), true));
+    if (store.get('panel', 'open') === 'collapsed') setPanelOpen(false, false);
     desktop.addEventListener?.('change', () => { setDrawer(false); S.map && setTimeout(() => S.map.invalidateSize(), 50); });
     S.mapShown = true;
   }
@@ -541,6 +540,22 @@
     $$('.sb-tabs [data-panel]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.panel === panel)));
   }
 
+  // Wide screens: fold the side panel away for a full-screen map (remembered per browser).
+  function setPanelOpen(open, save) {
+    const app = $('#layout'), btn = $('#panelToggle');
+    if (open === !app.classList.contains('panel-collapsed')) return;
+    app.classList.toggle('panel-collapsed', !open);
+    const label = open ? 'Hide the side panel' : 'Show the side panel';
+    btn.setAttribute('aria-expanded', String(open)); btn.setAttribute('aria-label', label); btn.title = label;
+    if (save) store.set('panel', open ? 'open' : 'collapsed');
+    // Keep the map centred while the panel slides (about 0.3 s).
+    if (!S.map) return;
+    const until = performance.now() + 340;
+    const step = () => { S.map.invalidateSize(); if (performance.now() < until) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+    setTimeout(() => S.map.invalidateSize(), 360);
+  }
+
   function setDrawer(open) {
     const app = $('#layout');
     if (open) setPanel('map');
@@ -556,6 +571,7 @@
     const map = L.map('map', {
       crs: L.CRS.Simple, minZoom: -3, maxZoom: m.maxZoom ?? 3, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 90,
       attributionControl: false, zoomControl: false, preferCanvas: true, renderer: L.canvas({ tolerance: 9 }),
+      maxBounds: L.latLngBounds(bounds), maxBoundsViscosity: 1,     // panning stops at the map's edges
     });
     S.map = map;
     map.createPane('base').style.zIndex = 250;      // base map < animal-range dots (350) < pins
@@ -565,7 +581,6 @@
         minZoom: -3, maxZoom: m.maxZoom ?? 3, minNativeZoom: m.minNativeZoom ?? -2, maxNativeZoom: m.maxNativeZoom ?? 2,
       })
       : L.imageOverlay(m.image, bounds, { className: 'base-map', pane: 'base' })).addTo(map);
-    map.setMaxBounds(L.latLngBounds(bounds).pad(0.2));
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     if (m.credit) L.control.attribution({ position: 'topright', prefix: false }).addAttribution(esc(m.credit)).addTo(map);
     S.homeBounds = bounds;
@@ -573,12 +588,11 @@
     // The container may get its final size after fonts/header settle; refit once it has.
     requestAnimationFrame(() => { map.invalidateSize(); homeView(); });
     map.on('zoomend', zoomClass); zoomClass();
+    map.on('resize', fitMinZoom);
     map.on('click', () => closePlace());
 
     const visible = new Set(store.get('layers', null) || S.data.layers.filter((l) => l.default).map((l) => l.id));
     for (const l of S.data.layers) S.layerGroups.set(l.id, L.layerGroup());
-    map.createPane('labels').style.zIndex = 450;     // names sit above the dots, under the pins
-    S.labelLayer = buildLabels().addTo(map);
     for (const p of S.data.places) {
       if (p.x == null || NAME_ONLY.has(p.type)) continue;
       const mk = makeMarker(p);
@@ -600,18 +614,28 @@
     try { S.map.getCenter(); S.map.invalidateSize(); } catch { homeView(); }
   }
 
-  // Wide screens see the whole map; narrow/portrait screens start on the main landmass
-  // (the Heartlands and Lemoyne), big enough to tap, with New Austin a swipe away.
+  // Zooming out stops where the map fills the whole map area (no shrunken map with empty
+  // margins). Re-worked out whenever the map area changes size, e.g. turning a phone.
+  function fitMinZoom() {
+    const size = S.map.getSize();
+    if (!size.x || !size.y) return;
+    S.map.options.minZoom = -6;                                // let the measurement go below the old limit
+    S.map.setMinZoom(S.map.getBoundsZoom(S.homeBounds, true));  // true = the map covers the view
+  }
+
+  // Wide screens open on the whole map, filling the screen; narrow/portrait screens start on
+  // the main landmass (the Heartlands and Lemoyne), big enough to tap, with New Austin a swipe away.
   function homeView() {
     const el = S.map.getContainer();
     if (!el.clientWidth || !el.clientHeight) return;          // still hidden (phone, guide tab)
     // A map created while hidden has no view and a cached 0×0 size: give it one, then re-measure.
     try { S.map.getCenter(); } catch { S.map.setView([-S.H / 2, S.W / 2], -2, { animate: false }); }
     S.map.invalidateSize({ pan: false });
-    const size = S.map.getSize();
-    if (size.x >= 700) { S.map.fitBounds(S.homeBounds, { padding: [8, 8] }); return; }
-    const z = Math.max(-3, Math.min(0, Math.log2(Math.min(size.x / 1150, size.y / 900))));
-    S.map.setView([-720, 1420], Math.round(z * 4) / 4, { animate: false });
+    fitMinZoom();
+    const size = S.map.getSize(), min = S.map.getMinZoom();
+    if (size.x >= 700) { S.map.setView([-S.H / 2, S.W / 2], min, { animate: false }); return; }
+    const z = Math.max(min, Math.min(0, Math.log2(Math.min(size.x / 1150, size.y / 900))));
+    S.map.setView([-720, 1420], Math.ceil(z * 4) / 4, { animate: false });
   }
 
   // Every place is a teardrop pin with its type's picture; the tip marks the spot.
@@ -621,21 +645,6 @@
     const mk = L.marker(ll(p), { icon, title: p.name, keyboard: !!t.named, riseOnHover: true });
     mk.on('click', (e) => { L.DomEvent.stop(e); onMarker(p); });
     return mk;
-  }
-
-  // Names on the map: states, regions, rivers and lakes, towns, camps and landmarks.
-  // Which ones show depends on the zoom (see the .lbl rules in style.css).
-  function buildLabels() {
-    const g = L.layerGroup();
-    const add = (kind, name, x, y, id) => {
-      const icon = L.divIcon({ className: `lbl lbl-${kind}`, iconSize: [0, 0], html: `<span>${esc(name)}</span>` });
-      const mk = L.marker([-y, x], { icon, pane: 'labels', interactive: !!id, keyboard: false });
-      if (id) mk.on('click', (e) => { L.DomEvent.stop(e); onMarker(S.places.get(id)); });
-      g.addLayer(mk);
-    };
-    for (const st of S.data.map.states || []) add('state', st.name, st.x, st.y);
-    for (const p of S.data.places) if (p.x != null && LABELLED[p.type]) add(LABELLED[p.type], p.name, p.x, p.y, p.id);
-    return g;
   }
 
   // Tapping a marker opens its card; pan only if the card would cover it.
@@ -648,15 +657,13 @@
     if (covered) centerBesideCard(p, S.map.getZoom(), true);
   }
 
-  // far / mid / near / close: pins shrink and fewer names show as you zoom out.
+  // far / mid / near / close: pins shrink as you zoom out.
   function zoomClass() {
     const z = S.map.getZoom();
     const el = S.map.getContainer();
     const band = z < -1.6 ? 'far' : z < -0.25 ? 'mid' : z < 0.75 ? 'near' : 'close';
     if (el.dataset.z !== band) el.dataset.z = band;
   }
-
-  const labelsOn = () => store.get('labels', S.data.map.labels !== false);
 
   function renderCategories(visible) {
     const counts = new Map();
@@ -667,7 +674,6 @@
     const html = CAT_GROUPS.map(([title, ids]) => {
       const rows = ids.map((id) => {
         if (id === ':ranges') return S.data.ranges ? row('data-ranges', pinHtml('#b5332a', 'paw'), 'Animal ranges', S.data.ranges.species.filter((sp) => sp.cells).length, false) : '';
-        if (id === ':labels') return row('data-labels', pinHtml('#5b4a38', 'names'), 'Place names', null, labelsOn());
         if (id === ':grid') return row('data-grid', pinHtml('#8b7760', 'grid'), 'Atlas grid', null, false);
         if (!counts.get(id)) return '';
         return row(`data-layer="${id}"`, typePin(id), names.get(id) || TYPES[id].label, counts.get(id), visible.has(id));
@@ -676,7 +682,6 @@
     }).join('');
     const list = $('#catList');
     list.innerHTML = html;
-    if (!labelsOn()) S.map.getContainer().classList.add('no-labels');
     const save = () => store.set('layers', $$('#catList [data-layer][aria-pressed="true"]').map((x) => x.dataset.layer));
     const setLayer = (b, on) => {
       b.setAttribute('aria-pressed', String(on));
@@ -686,12 +691,6 @@
     list.addEventListener('click', (e) => {
       const hr = e.target.closest('[data-ranges]');
       if (hr) { S.range ? hideRange() : showRange(S.lastRange || 'all'); setDrawer(false); return; }
-      const lb = e.target.closest('[data-labels]');
-      if (lb) {
-        const on = lb.getAttribute('aria-pressed') !== 'true';
-        lb.setAttribute('aria-pressed', String(on)); store.set('labels', on);
-        S.map.getContainer().classList.toggle('no-labels', !on); return;
-      }
       const g = e.target.closest('[data-grid]');
       if (g) { const on = g.getAttribute('aria-pressed') !== 'true'; g.setAttribute('aria-pressed', String(on)); on ? S.gridLayer.addTo(S.map) : S.gridLayer.remove(); return; }
       const b = e.target.closest('[data-layer]'); if (!b) return;
@@ -1008,7 +1007,7 @@
   /* ---------- open a topic in the guide ---------- */
   function openTopic(id, scroll) {
     const el = document.getElementById('topic-' + id); if (!el) return;
-    if (!desktop.matches) setView('guide'); else setPanel('guide');
+    if (!desktop.matches) setView('guide'); else { setPanelOpen(true, false); setPanel('guide'); }
     if (el.hidden) { S.activeCats.clear(); applyFilter(); }
     // Open instantly (no height animation) so the scroll target is already in its final place.
     const sec = el.closest('.sec');
