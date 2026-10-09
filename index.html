@@ -6,6 +6,28 @@
   <title>Campfire · RDR2 Field Companion</title>
   <meta name="description" content="Campfire is an unofficial, searchable companion to the Red Dead Redemption 2 Complete Official Guide: an interactive map with every collectible, animal ranges, and every topic with its guide page.">
   <meta name="theme-color" content="#e6d6b4">
+  <!-- Home-screen app (iPad / iPhone "Add to Home Screen", and installable elsewhere) -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Campfire">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="apple-touch-startup-image" href="icons/splash-744x1133-portrait.png" media="(device-width: 744px) and (device-height: 1133px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="icons/splash-744x1133-landscape.png" media="(device-width: 744px) and (device-height: 1133px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+  <link rel="apple-touch-startup-image" href="icons/splash-768x1024-portrait.png" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="icons/splash-768x1024-landscape.png" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+  <link rel="apple-touch-startup-image" href="icons/splash-810x1080-portrait.png" media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="icons/splash-810x1080-landscape.png" media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+  <link rel="apple-touch-startup-image" href="icons/splash-820x1180-portrait.png" media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="icons/splash-820x1180-landscape.png" media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+  <link rel="apple-touch-startup-image" href="icons/splash-834x1112-portrait.png" media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="icons/splash-834x1112-landscape.png" media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+  <link rel="apple-touch-startup-image" href="icons/splash-834x1194-portrait.png" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="icons/splash-834x1194-landscape.png" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+  <link rel="apple-touch-startup-image" href="icons/splash-1024x1366-portrait.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="icons/splash-1024x1366-landscape.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314161c'/%3E%3Cpath d='M32 12c4 8 12 12 12 22a12 12 0 0 1-24 0c0-6 4-9 6-14 2 4 3 6 6 7-1-6-2-10 0-15z' fill='%23e07a2e'/%3E%3Cpath d='M18 50l28-6M46 50l-28-6' stroke='%23eadfcb' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -37,6 +59,9 @@
           <button type="button" data-view="guide" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></svg>Guide
           </button>
+          <button type="button" data-view="hundred" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 12.5l3 3 5.5-6.5"/></svg>100%
+          </button>
         </nav>
       </div>
 
@@ -59,6 +84,7 @@
       <div class="sb-tabs" role="tablist" aria-label="Sidebar">
         <button type="button" role="tab" data-panel="map" aria-selected="true">Map categories</button>
         <button type="button" role="tab" data-panel="guide" aria-selected="false">The guide</button>
+        <button type="button" role="tab" data-panel="hundred" aria-selected="false">100%</button>
       </div>
       <div class="sb-drawer-head">
         <span>Map categories</span>
@@ -83,7 +109,7 @@
             </span>
             <input type="file" id="pgFile" accept=".json,application/json" hidden>
           </div>
-          <p class="pg-tip">Open a place and tap <b>Mark as found</b>, or right-click its pin (press and hold on a phone). Saved in this browser.</p>
+          <p class="pg-tip">Open a place and tap <b>Mark as found</b>, or press and hold its pin (right-click with a mouse). Saved on this device.</p>
         </div>
         <div class="sb-actions">
           <button type="button" class="textbtn" id="showAll">Show all</button>
@@ -121,6 +147,10 @@
             <p class="mono dim" id="sourceLine"></p>
           </footer>
         </div>
+      </section>
+
+      <section class="sb-panel sb-hundred" id="hundredPanel" aria-label="100% checklist">
+        <div class="hd" id="hd"><p class="hd-loading">Loading the 100% checklist…</p></div>
       </section>
     </aside>
     <div class="scrim" id="scrim" hidden></div>

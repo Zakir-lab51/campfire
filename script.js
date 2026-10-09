@@ -9,7 +9,11 @@
     get(k, d) { try { const v = localStorage.getItem('campfire:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('campfire:' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
   };
-  const desktop = window.matchMedia('(min-width: 960px)');
+  // Side panel + map together on wide screens and on any iPad (portrait too); one view at a time on phones.
+  const desktop = window.matchMedia('(min-width: 960px), (min-width: 740px) and (min-height: 600px)');
+  const touch = navigator.maxTouchPoints > 0;
+  // iPadOS Safari reports itself as a Mac, so check for touch too.
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
   /* ---------- look of each place type: pin colour + picture ---------- */
   const TYPES = {
@@ -103,6 +107,7 @@
     results: [], activeResult: -1,
     ranges: null, range: null, rangeLayer: null, lastRange: { animal: 'all', plant: 'plants' }, panelKind: null,
     found: new Set(store.get('found', [])), hideFound: store.get('hideFound', false),
+    done: new Set(store.get('done', [])), hundred: null,                 // 100% checklist ticks (task ids)
   };
 
   /* ---------- boot ---------- */
@@ -546,8 +551,8 @@
     $('#layout').dataset.view = v;
     $$('.viewtabs [data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
     setDrawer(false);
-    setPanel(v === 'guide' ? 'guide' : 'map');
-    if (v === 'guide') window.scrollTo(0, 0);
+    setPanel(v === 'map' ? 'map' : v);
+    if (v !== 'map') window.scrollTo(0, 0);
     if (v === 'map' && S.map) requestAnimationFrame(() => {
       if (!S.mapShown) { S.mapShown = true; if (!S.selected) { homeView(); return; } }
       ensureView();
@@ -558,6 +563,7 @@
   function setPanel(panel) {
     $('#sidebar').dataset.panel = panel;
     $$('.sb-tabs [data-panel]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.panel === panel)));
+    if (panel === 'hundred') loadHundred();
   }
 
   // Wide screens: fold the side panel away for a full-screen map (remembered per browser).
@@ -592,6 +598,7 @@
       crs: L.CRS.Simple, minZoom: -3, maxZoom: m.maxZoom ?? 3, zoomSnap: 0.25, zoomDelta: 0.5,
       wheelPxPerZoomLevel: 80, wheelDebounceTime: 20,
       attributionControl: false, zoomControl: false, preferCanvas: true, renderer: L.canvas({ tolerance: 9 }),
+      tapHold: touch,                                  // press and hold a pin = right-click (iPad Safari included)
       maxBounds: L.latLngBounds(bounds), maxBoundsViscosity: 1,     // panning stops at the map's edges
     });
     S.map = map;
@@ -783,7 +790,14 @@
   /* ---------- progress: places ticked off as found (kept in this browser) ---------- */
   const trackable = (p) => p && p.x != null && !NAME_ONLY.has(p.type);
 
-  function saveFound() { store.set('found', [...S.found]); }
+  function saveFound() { store.set('found', [...S.found]); keepStorage(); }
+
+  // Ask the browser to keep Campfire's saved progress rather than clearing it to free space.
+  function keepStorage() {
+    if (S.askedPersist) return;
+    S.askedPersist = true;
+    navigator.storage?.persist?.().catch(() => {});
+  }
 
   function toggleFound(id, on = !S.found.has(id)) {
     const p = S.places.get(id); if (!trackable(p)) return;
@@ -791,6 +805,7 @@
     saveFound();
     refreshMarker(p);
     renderProgress();
+    syncHundred();
     if (S.selected === id && !$('#placeCard').hidden) renderFoundBtn(p);
   }
 
@@ -834,9 +849,17 @@
       S.hideFound = hide.checked; store.set('hideFound', S.hideFound);
       for (const id of S.found) { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); }
     });
-    $('#pgExport').addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify({ app: 'campfire', saved: new Date().toISOString(), found: [...S.found] }, null, 1)], { type: 'application/json' });
-      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'campfire-progress.json' });
+    $('#pgExport').addEventListener('click', async () => {
+      const json = JSON.stringify({ app: 'campfire', saved: new Date().toISOString(), found: [...S.found], done: [...S.done] }, null, 1);
+      const name = 'campfire-progress.json';
+      // On iPad/iPhone (and in the home-screen app) the share sheet is the reliable way to save a file.
+      if (touch && navigator.canShare) {
+        const f = new File([json], name, { type: 'application/json' });
+        if (navigator.canShare({ files: [f] })) {
+          try { await navigator.share({ files: [f], title: 'Campfire progress' }); return; } catch (e) { if (e.name === 'AbortError') return; }
+        }
+      }
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([json], { type: 'application/json' })), download: name });
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     });
@@ -844,31 +867,194 @@
     $('#pgImport').addEventListener('click', () => file.click());
     file.addEventListener('change', async () => {
       const f = file.files[0]; file.value = ''; if (!f) return;
-      let ids;
-      try { const j = JSON.parse(await f.text()); ids = Array.isArray(j) ? j : j.found; } catch { ids = null; }
+      let ids, done = [];
+      try { const j = JSON.parse(await f.text()); ids = Array.isArray(j) ? j : j.found; done = Array.isArray(j.done) ? j.done : []; } catch { ids = null; }
       if (!Array.isArray(ids)) { alert("That file doesn't look like a Campfire progress file."); return; }
       const fresh = ids.filter((id) => trackable(S.places.get(id)) && !S.found.has(id));
       for (const id of fresh) S.found.add(id);
-      saveFound(); fresh.forEach((id) => refreshMarker(S.places.get(id))); renderProgress();
-      alert(fresh.length ? `Added ${fresh.length} found place${fresh.length === 1 ? '' : 's'}.` : 'Nothing new: those places were already marked.');
+      const ticks = done.filter((id) => typeof id === 'string' && !S.done.has(id));
+      for (const id of ticks) S.done.add(id);
+      saveFound(); store.set('done', [...S.done]);
+      fresh.forEach((id) => refreshMarker(S.places.get(id))); renderProgress(); syncHundred();
+      const parts = [fresh.length && `${fresh.length} found place${fresh.length === 1 ? '' : 's'}`, ticks.length && `${ticks.length} checklist tick${ticks.length === 1 ? '' : 's'}`].filter(Boolean);
+      alert(parts.length ? `Added ${parts.join(' and ')}.` : 'Nothing new: all of that was already marked.');
     });
     $('#pgReset').addEventListener('click', () => {
       if (!S.found.size || !confirm(`Clear all ${S.found.size} found places? (Export first if you want a copy.)`)) return;
       const was = [...S.found]; S.found.clear(); saveFound();
       was.forEach((id) => { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); });
-      renderProgress();
+      renderProgress(); syncHundred();
       if (S.selected && !$('#placeCard').hidden) renderFoundBtn(S.places.get(S.selected));
     });
     // Another tab marked something: pick it up.
     window.addEventListener('storage', (e) => {
+      if (e.key === 'campfire:done') { S.done = new Set(store.get('done', [])); syncHundred(); return; }
       if (e.key !== 'campfire:found') return;
       const next = new Set(store.get('found', []));
       const changed = [...new Set([...S.found, ...next])].filter((id) => S.found.has(id) !== next.has(id));
       S.found = next;
       changed.forEach((id) => { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); });
-      renderProgress();
+      renderProgress(); syncHundred();
     });
     renderProgress();
+  }
+
+  /* ---------- 100% checklist ----------
+     Tasks in route order from Jimbatron's "RDR2 100% Completion Strategy Guide" (GTAForums), loaded
+     from hundred.json the first time the tab opens. A task tied to a map pin (a legendary animal or
+     fish, a bounty, a hideout) is done exactly when that pin is marked found, so the two stay in step. */
+  const KIND_LABEL = { story: 'Story', side: 'Side quests', challenge: 'Challenges', collect: 'Collectibles', prep: 'Prep & optional' };
+  const isDone = (t) => (t.p ? S.found.has(t.p) : S.done.has(t.id));
+
+  function loadHundred() {
+    if (!S.hundredLoad) {
+      S.hundredLoad = fetch('hundred.json', { cache: 'no-cache' })
+        .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then((h) => {
+          S.hundred = h; S.hTasks = new Map();
+          for (const c of h.chapters) for (const part of c.parts) for (const t of part.tasks) { t.ch = c.id; S.hTasks.set(t.id, t); }
+          renderHundred();
+        })
+        .catch(() => { $('#hd').innerHTML = '<p class="hd-loading">Couldn\'t load the checklist. Check your connection and try again.</p>'; S.hundredLoad = null; });
+    }
+    return S.hundredLoad;
+  }
+
+  function openHundred(taskId) {
+    if (desktop.matches) { setPanelOpen(true, false); setPanel('hundred'); } else setView('hundred');
+    loadHundred().then(() => { if (taskId && S.hTasks?.has(taskId)) jumpToTask(taskId); });
+  }
+
+  function renderHundred() {
+    const h = S.hundred, src = h.source;
+    const filter = store.get('hundredFilter', 'all'), hide = store.get('hundredHideDone', false);
+    const box = $('#hd');
+    box.dataset.filter = filter;
+    box.classList.toggle('hide-done', hide);
+    const li = (a) => a.map((x) => `<li>${esc(x)}</li>`).join('');
+    box.innerHTML = `
+      <header class="hd-head">
+        <h2>100% checklist</h2>
+        <p class="hd-src">Every task for 100% completion, in an order that saves backtracking. The route and its video guides are by
+          <a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.author)} on ${esc(src.site)}</a>; the summaries and tips are written for Campfire.
+          Ticks are saved on this device, and the progress Export on the map tab includes them.</p>
+        <div class="hd-prog">
+          <div class="pg-head"><span class="pg-title">Completion</span><span class="pg-num"><span id="hdNum"></span> · <b id="hdPct"></b></span></div>
+          <div class="pg-bar" aria-hidden="true"><span id="hdBar"></span></div>
+          <p class="hd-next" id="hdNext"></p>
+        </div>
+        <div class="hd-tools" role="group" aria-label="Show tasks">
+          ${[['all', 'All'], ...Object.entries(KIND_LABEL)].map(([k, l]) => `<button type="button" class="chip" data-filter="${k}" aria-pressed="${k === filter}">${l}</button>`).join('')}
+          <label class="pg-hide"><input type="checkbox" id="hdHide" ${hide ? 'checked' : ''}> Hide done</label>
+        </div>
+      </header>
+      <details class="hd-info"><summary>What 100% needs</summary><div class="hd-info-body">
+        <div class="hd-req">${h.requirements.map((g) => `<div><h4>${esc(g.group)}</h4><ul>${li(g.items)}</ul></div>`).join('')}</div>
+        <h4>Ticked off by other tasks</h4><ul>${h.covered.map((c) => `<li>${esc(c.item)}: by ${esc(c.by)}</li>`).join('')}</ul>
+        <h4>Happen anyway as you play</h4><ul>${li(h.natural)}</ul>
+        <h4>Worth knowing before you start</h4><ul>${li(h.tips)}</ul>
+      </div></details>
+      ${h.chapters.map((c) => `<details class="hd-ch" data-ch="${esc(c.id)}"><summary><span class="hd-ch-title">${esc(c.title)}</span><span class="hd-ch-n"></span><span class="hd-ch-bar"><span></span></span></summary><div class="hd-ch-body"></div></details>`).join('')}
+      <p class="hd-src" style="margin-top:18px"><button type="button" class="textbtn" id="hdReset">Clear checklist ticks</button></p>`;
+    $$('.hd-ch', box).forEach((d) => d.addEventListener('toggle', () => { if (d.open) renderChapter(d); }));
+    box.onclick = (e) => {
+      const chk = e.target.closest('.hd-check'); if (chk) { toggleTask(chk.closest('.hd-task').dataset.id); return; }
+      const f = e.target.closest('[data-filter]');
+      if (f) {
+        box.dataset.filter = f.dataset.filter; store.set('hundredFilter', f.dataset.filter);
+        $$('.hd-tools [data-filter]', box).forEach((b) => b.setAttribute('aria-pressed', String(b === f))); return;
+      }
+      const j = e.target.closest('[data-jump]'); if (j) { jumpToTask(j.dataset.jump); return; }
+      const tp = e.target.closest('[data-topic]'); if (tp) { openTopic(tp.dataset.topic, true); return; }
+      const pl = e.target.closest('[data-place]'); if (pl) { showPlace(pl.dataset.place, true); return; }
+      if (e.target.closest('#hdReset')) {
+        if (!S.done.size || !confirm(`Clear all ${S.done.size} checklist ticks? Places marked found on the map stay as they are.`)) return;
+        S.done.clear(); store.set('done', []); syncHundred();
+      }
+    };
+    $('#hdHide', box).addEventListener('change', (e) => { box.classList.toggle('hide-done', e.target.checked); store.set('hundredHideDone', e.target.checked); });
+    // open the chapter you're in
+    const next = nextTask();
+    const open = $(`.hd-ch[data-ch="${next ? next.ch : h.chapters[0].id}"]`, box);
+    if (open) open.open = true;
+    syncHundred();
+  }
+
+  function renderChapter(d) {
+    if (d.dataset.ready) return;
+    d.dataset.ready = '1';
+    const c = S.hundred.chapters.find((x) => x.id === d.dataset.ch);
+    $('.hd-ch-body', d).innerHTML = c.parts.map((part) => `<section class="hd-part">
+      ${part.title ? `<h3>${esc(part.title)}</h3>` : ''}<p class="hd-sum">${esc(part.summary)}</p>
+      <ol class="hd-tasks">${part.tasks.map(taskHtml).join('')}</ol></section>`).join('');
+    syncHundred();
+  }
+
+  function taskHtml(t) {
+    const links = (t.v || []).map((v, i, all) => `<a href="${esc(v)}" target="_blank" rel="noopener">${all.length > 1 ? `Video ${i + 1}` : 'Video'}</a>`);
+    if (t.tp && S.topics.has(t.tp)) links.push(`<button type="button" data-topic="${esc(t.tp)}">In the guide</button>`);
+    if (t.p && S.places.get(t.p)?.x != null) links.push(`<button type="button" data-place="${esc(t.p)}">On the map</button>`);
+    return `<li class="hd-task k-${t.k}" data-id="${esc(t.id)}">
+      <button type="button" class="hd-check" aria-pressed="false" aria-label="Done: ${esc(t.n)}">${TICK}</button>
+      <div><div class="hd-line"><span class="hd-type">${esc(t.t)}</span><span class="hd-name">${esc(t.n)}</span>${t.c ? `<span class="hd-count" data-count="${esc(t.c)}"></span>` : ''}${t.w ? `<span class="hd-where">${esc(t.w)}</span>` : ''}</div>
+      ${t.tip ? `<p class="hd-tip">${esc(t.tip)}</p>` : ''}${links.length ? `<div class="hd-links">${links.join('')}</div>` : ''}</div></li>`;
+  }
+
+  function toggleTask(id) {
+    const t = S.hTasks.get(id); if (!t) return;
+    if (t.p) { toggleFound(t.p); return; }                     // also updates the map and calls syncHundred
+    S.done.has(id) ? S.done.delete(id) : S.done.add(id);
+    store.set('done', [...S.done]); keepStorage();
+    syncHundred();
+  }
+
+  const nextTask = () => { for (const t of S.hTasks.values()) if (t.k !== 'optional' && !isDone(t)) return t; return null; };
+
+  function jumpToTask(id) {
+    const t = S.hTasks.get(id); if (!t) return;
+    const box = $('#hd');
+    if (box.dataset.filter !== 'all' && !box.classList.contains('hide-done')) { /* keep the filter */ }
+    const d = $(`.hd-ch[data-ch="${t.ch}"]`, box); d.open = true; renderChapter(d);
+    const el = $(`.hd-task[data-id="${CSS.escape(id)}"]`, box); if (!el) return;
+    scrollToEl(el);
+    el.classList.remove('is-flash'); void el.offsetWidth; el.classList.add('is-flash');
+  }
+
+  // Bring every rendered tick, count and progress figure in line with S.done / S.found.
+  function syncHundred() {
+    if (!S.hundred) return;
+    const box = $('#hd');
+    for (const el of $$('.hd-task', box)) {
+      const done = isDone(S.hTasks.get(el.dataset.id));
+      el.classList.toggle('is-done', done);
+      $('.hd-check', el).setAttribute('aria-pressed', String(done));
+    }
+    const found = new Map(), total = new Map();
+    for (const p of S.data.places) {
+      if (!trackable(p)) continue;
+      total.set(p.type, (total.get(p.type) || 0) + 1);
+      if (S.found.has(p.id)) found.set(p.type, (found.get(p.type) || 0) + 1);
+    }
+    for (const el of $$('[data-count]', box)) el.textContent = `map: ${found.get(el.dataset.count) || 0}/${total.get(el.dataset.count) || 0} found`;
+    let all = 0, done = 0;
+    for (const c of S.hundred.chapters) {
+      let ca = 0, cd = 0;
+      for (const part of c.parts) for (const t of part.tasks) if (t.k !== 'optional') { ca++; if (isDone(t)) cd++; }
+      all += ca; done += cd;
+      const d = $(`.hd-ch[data-ch="${c.id}"]`, box);
+      if (!d) continue;
+      const n = $('.hd-ch-n', d); n.textContent = `${cd}/${ca}`; n.classList.toggle('is-done', cd === ca);
+      $('.hd-ch-bar span', d).style.width = `${ca ? (cd / ca) * 100 : 0}%`;
+    }
+    const pct = all ? (done / all) * 100 : 0;
+    $('#hdNum').textContent = `${done} / ${all} tasks`;
+    $('#hdPct').textContent = `${pct < 1 && done ? pct.toFixed(1) : Math.floor(pct)}%`;
+    $('#hdBar').style.width = `${pct}%`;
+    const next = nextTask();
+    const chTitle = (id) => S.hundred.chapters.find((c) => c.id === id)?.title || '';
+    $('#hdNext').innerHTML = next
+      ? `<span>Next up:</span><button type="button" class="textbtn" data-jump="${esc(next.id)}">${esc(next.t)}: ${esc(next.n)}</button><span>(${esc(chTitle(next.ch))})</span>`
+      : '<span>Every task is ticked. Best in the West!</span>';
   }
 
   function renderFoundBtn(p) {
@@ -1012,7 +1198,12 @@
     }
     S.rangeCache.set(key, res);
     // keep only the most recent ranges' drawings in memory
-    if (S.rangeCache.size > 8) S.rangeCache.delete(S.rangeCache.keys().next().value);
+    // (fewer on iPad/iPhone, where Safari caps total canvas memory; shrinking a canvas frees it at once)
+    if (S.rangeCache.size > (ios ? 4 : 8)) {
+      const old = S.rangeCache.keys().next().value, r = S.rangeCache.get(old);
+      if (r?.img?.el && S.range !== old) { r.img.el.width = r.img.el.height = 0; }
+      S.rangeCache.delete(old);
+    }
     return res;
   }
 
@@ -1047,7 +1238,7 @@
       y0 = Math.max(0, -b.getNorth() - pad); y1 = Math.min(S.H, -b.getSouth() + pad);
     }
     // pixels per map unit: sharp enough up close, but never a huge canvas (phones)
-    const cap = desktop.matches ? 2048 : 1400;                      // largest canvas side, px
+    const cap = ios ? 1600 : desktop.matches ? 2048 : 1400;          // largest canvas side, px (iOS caps canvas memory)
     const k = Math.max(0.4, Math.min(multi ? (desktop.matches ? 0.9 : 0.6) : 2.5, cap / Math.max(x1 - x0, y1 - y0)));
     const w = Math.ceil((x1 - x0) * k), h = Math.ceil((y1 - y0) * k);
     const shape = document.createElement('canvas'); shape.width = w; shape.height = h;
@@ -1330,6 +1521,7 @@
     if (k === 'topic' && v) openTopic(v, true);
     else if (k === 'place' && v) showPlace(v, false);
     else if (k === 'range' && v) showRange(v, { fit: true });
+    else if (k === 'hundred') openHundred(v);
   }
 
   function copyLink(kind, id, btn) {
