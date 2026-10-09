@@ -67,17 +67,19 @@
     flower: '<circle cx="12" cy="6.6" r="2.7"/><circle cx="7.4" cy="10.2" r="2.7"/><circle cx="16.6" cy="10.2" r="2.7"/><circle cx="9.2" cy="15.6" r="2.7"/><circle cx="14.8" cy="15.6" r="2.7"/><circle class="f" cx="12" cy="11.2" r="1.9"/>',
     egg: '<path d="M12 3c3.5 0 6 5.6 6 10.2a6 6 0 0 1-12 0C6 8.6 8.5 3 12 3z"/>',
     grid: '<path d="M4 4h16v16H4zM4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16"/>',
+    leaf: '<path d="M5 19.5C4.6 11 9.6 4.8 20 4c.4 10.2-5.6 15.6-15 15.5z"/><path d="M5 19.5l8.6-8.6"/>',
   };
   const glyph = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[name] || GLYPHS.excl}</svg>`;
   const PIN = 'M14 35C12.6 29.5 2 22.5 2 13a12 12 0 0 1 24 0c0 9.5-10.6 16.5-12 22z';
-  const pinHtml = (color, g) => `<span class="pin" style="--c:${color}"><svg class="body" viewBox="0 0 28 36" aria-hidden="true"><path d="${PIN}"/></svg><span class="glyph">${glyph(g)}</span></span>`;
-  const typePin = (type) => { const t = TYPES[type] || TYPES.landmark; return pinHtml(t.color, t.glyph); };
+  const pinHtml = (color, g, extra = '') => `<span class="pin" style="--c:${color}"><svg class="body" viewBox="-1 -1 31 39" aria-hidden="true"><path class="sh" d="${PIN}" transform="translate(1.4 2.2)"/><path d="${PIN}"/></svg><span class="glyph">${glyph(g)}</span>${extra}</span>`;
+  const typePin = (type, extra) => { const t = TYPES[type] || TYPES.landmark; return pinHtml(t.color, t.glyph, extra); };
+  const TICK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   // Regions, rivers and lakes get no pin: the base map already names them (they stay searchable).
   const NAME_ONLY = new Set(['area', 'water']);
   const CAT_GROUPS = [
     ['Places', ['town', 'camp', 'landmark', 'hideout', 'shack', 'poi', 'shop']],
     ['People & jobs', ['stranger', 'special', 'bounty', 'request']],
-    ['Hunting & fishing', ['legendary', 'legendary-fish', ':ranges']],
+    ['Hunting & gathering', ['legendary', 'legendary-fish', ':ranges', ':plants']],
     ['Collectibles', ['card', 'bone', 'carving', 'dreamcatcher', 'treasure', 'chest', 'tonic', 'unique', 'orchid', 'gator-egg']],
     ['On the map', [':grid']],
   ];
@@ -88,6 +90,7 @@
     link: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
     chev: '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>',
     close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    leaf: '<svg viewBox="0 0 24 24"><path d="M5 19.5C4.6 11 9.6 4.8 20 4c.4 10.2-5.6 15.6-15 15.5z"/><path d="M5 19.5l8.6-8.6"/></svg>',
     paw: '<svg viewBox="0 0 24 24"><path d="M12 13.5c-2.6 0-5 2.6-5 4.6 0 1.4 1.2 2.1 2.5 2.1 1 0 1.6-.5 2.5-.5s1.5.5 2.5.5c1.3 0 2.5-.7 2.5-2.1 0-2-2.4-4.6-5-4.6z"/><ellipse cx="5.5" cy="10.6" rx="1.7" ry="2.1"/><ellipse cx="9.3" cy="6.6" rx="1.7" ry="2.2"/><ellipse cx="14.7" cy="6.6" rx="1.7" ry="2.2"/><ellipse cx="18.5" cy="10.6" rx="1.7" ry="2.1"/></svg>',
   };
 
@@ -98,10 +101,14 @@
     map: null, H: 0, W: 0, layerGroups: new Map(), markerOf: new Map(), selected: null,
     hitLayer: null, gridLayer: null, mapReady: false, view: 'map',
     results: [], activeResult: -1,
-    ranges: null, range: null, rangeLayer: null,
+    ranges: null, range: null, rangeLayer: null, lastRange: { animal: 'all', plant: 'plants' }, panelKind: null,
+    found: new Set(store.get('found', [])), hideFound: store.get('hideFound', false),
   };
 
   /* ---------- boot ---------- */
+  if ('serviceWorker' in navigator && /^https:|^http:\/\/localhost/.test(location.href)) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
   fetch('data.json', { cache: 'no-cache' })            // revalidate, so content edits show up straight away
     .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(init)
@@ -367,7 +374,10 @@
 
   function renderResults(q, topics, places) {
     const box = $('#results');
-    if (!topics.length && !places.length) {
+    const tokens = queryTokens();
+    const plants = S.ranges && tokens.length ? S.data.ranges.species.filter((sp) => sp.kind === 'plant'
+      && tokens.every((t) => wordRanges(sp.name, [t]).length)).slice(0, 3) : [];
+    if (!topics.length && !places.length && !plants.length) {
       box.innerHTML = `<div class="results-empty">No matches for “${esc(q)}”. Try fewer words, or one of the quick searches.</div>`;
       return;
     }
@@ -384,10 +394,10 @@
     });
     const placesFirst = places.length && (!topics.length || nameHit || places[0].score < topics[0].score - 0.05);
     // A species named in the query gets its range map offered first.
-    const tokens = queryTokens();
     const species = S.ranges && tokens.length ? topics.slice(0, 8).filter((r) => S.ranges.has(r.item.id)
       && tokens.every((t) => wordRanges(r.item.title, [t]).length)).slice(0, 3) : [];
-    const rGroup = species.length ? `<div class="results-group"><h3>Animal ranges</h3></div>${species.map((r, i) => rangeRow(r.item.id, i)).join('')}` : '';
+    const rGroup = (species.length ? `<div class="results-group"><h3>Animal ranges</h3></div>${species.map((r, i) => rangeRow(r.item.id, i)).join('')}` : '')
+      + (plants.length ? `<div class="results-group"><h3>Where plants grow</h3></div>${plants.map((sp, i) => rangeRow(sp.topic, i)).join('')}` : '');
     box.innerHTML = rGroup + (placesFirst ? pGroup + tGroup : tGroup + pGroup);
     S.activeResult = -1;
   }
@@ -434,7 +444,9 @@
     let meta;
     if (isTopic) meta = pageLabel(S.topics.get(it.id));
     else { const p = S.places.get(it.id); meta = p.atlasPage ? `atlas p. ${p.atlasPage}` : (TYPES[p.type] || {}).label; }
-    return `<button class="result" type="button" role="option" data-kind="${it.kind}" data-id="${esc(it.id)}" style="--c:${color};animation-delay:${Math.min(i, 8) * 18}ms">
+    const found = !isTopic && S.found.has(it.id);
+    if (found) meta = `✓ found · ${meta}`;
+    return `<button class="result${found ? ' is-found' : ''}" type="button" role="option" data-kind="${it.kind}" data-id="${esc(it.id)}" style="--c:${color};animation-delay:${Math.min(i, 8) * 18}ms">
       <span class="result-ico">${isTopic ? ICONS.topic : glyph((TYPES[S.places.get(it.id).type] || TYPES.landmark).glyph)}</span>
       <span><span class="result-title">${title}</span><span class="result-snip">${snip}</span></span>
       <span class="result-meta">${esc(meta)}</span>
@@ -442,7 +454,15 @@
   }
 
   function rangeRow(id, i) {
-    const sp = S.ranges.get(id); const t = S.topics.get(id);
+    const sp = S.ranges.get(id);
+    if (sp.kind === 'plant') {
+      return `<button class="result" type="button" role="option" data-kind="r" data-id="${esc(id)}" style="--c:#3f8a3a;animation-delay:${i * 18}ms">
+      <span class="result-ico">${ICONS.leaf}</span>
+      <span><span class="result-title">${highlight(sp.name, wordRanges(sp.name, queryTokens()))}: where it grows</span><span class="result-snip">${esc(sp.where)}</span></span>
+      <span class="result-meta">p. ${sp.page}</span>
+    </button>`;
+    }
+    const t = S.topics.get(id);
     const snip = sp.cells ? `Red dots where the guide marks it on its habitat map${sp.guarma ? ' (also on Guarma)' : ''}` : "Only found on Guarma, which isn't on this map";
     return `<button class="result" type="button" role="option" data-kind="r" data-id="${esc(id)}" style="--c:#b5332a;animation-delay:${i * 18}ms">
       <span class="result-ico">${ICONS.paw}</span>
@@ -569,18 +589,30 @@
     const m = S.data.map; S.H = m.height; S.W = m.width;
     const bounds = [[-S.H, 0], [0, S.W]];
     const map = L.map('map', {
-      crs: L.CRS.Simple, minZoom: -3, maxZoom: m.maxZoom ?? 3, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 90,
+      crs: L.CRS.Simple, minZoom: -3, maxZoom: m.maxZoom ?? 3, zoomSnap: 0.25, zoomDelta: 0.5,
+      wheelPxPerZoomLevel: 80, wheelDebounceTime: 20,
       attributionControl: false, zoomControl: false, preferCanvas: true, renderer: L.canvas({ tolerance: 9 }),
       maxBounds: L.latLngBounds(bounds), maxBoundsViscosity: 1,     // panning stops at the map's edges
     });
     S.map = map;
-    map.createPane('base').style.zIndex = 250;      // base map < animal-range dots (350) < pins
-    (m.tiles
-      ? L.tileLayer(m.tiles, {
-        pane: 'base', className: 'base-map', tileSize: 256, noWrap: true, keepBuffer: 3, bounds: L.latLngBounds(bounds),
+    map.createPane('base').style.zIndex = 250;      // base map < animal ranges (350) < pins
+    const ver = (url, v) => (v ? `${url}${url.includes('?') ? '&' : '?'}v=${v}` : url);
+    if (m.tiles) {
+      // A small picture of the whole map sits under the tiles, so moving and zooming never
+      // show blank paper while sharper tiles arrive.
+      if (m.backdrop) L.imageOverlay(ver(m.backdrop, m.v), bounds, { pane: 'base', className: 'base-backdrop', zIndex: 0 }).addTo(map);
+      S.tileUrl = ver(m.tiles, m.v);
+      S.tiles = L.tileLayer(S.tileUrl, {
+        pane: 'base', className: 'base-map', tileSize: 256, noWrap: true, bounds: L.latLngBounds(bounds), zIndex: 1,
         minZoom: -3, maxZoom: m.maxZoom ?? 3, minNativeZoom: m.minNativeZoom ?? -2, maxNativeZoom: m.maxNativeZoom ?? 2,
-      })
-      : L.imageOverlay(m.image, bounds, { className: 'base-map', pane: 'base' })).addTo(map);
+        keepBuffer: 6,                 // keep a wide ring of tiles around the view for quick panning
+        updateWhenIdle: false,         // load tiles while dragging, not only after
+        updateWhenZooming: false,      // skip in-between levels during a zoom animation
+      }).addTo(map);
+      map.on('moveend', prefetchTiles);
+    } else {
+      L.imageOverlay(m.image, bounds, { className: 'base-map', pane: 'base' }).addTo(map);
+    }
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     if (m.credit) L.control.attribution({ position: 'topright', prefix: false }).addAttribution(esc(m.credit)).addTo(map);
     S.homeBounds = bounds;
@@ -597,7 +629,7 @@
       if (p.x == null || NAME_ONLY.has(p.type)) continue;
       const mk = makeMarker(p);
       S.markerOf.set(p.id, mk);
-      (S.layerGroups.get(p.type) || S.layerGroups.get('landmark')).addLayer(mk);
+      if (!(S.hideFound && S.found.has(p.id))) groupOf(p).addLayer(mk);
     }
     for (const [id, g] of S.layerGroups) if (visible.has(id)) g.addTo(map);
     S.hitLayer = L.layerGroup().addTo(map);
@@ -608,6 +640,33 @@
   }
 
   const ll = (p) => [-p.y, p.x];
+
+  // After the map settles, quietly fetch the tiles for the next zoom level in (and the one out)
+  // over the current view, so the next zoom shows sharp tiles straight away. Skipped when the
+  // browser asks to save data.
+  let prefetchT;
+  function prefetchTiles() {
+    clearTimeout(prefetchT);
+    prefetchT = setTimeout(() => {
+      const c = navigator.connection;
+      if (!S.tiles || (c && (c.saveData || /2g/.test(c.effectiveType || '')))) return;
+      const m = S.data.map, z = Math.round(S.map.getZoom()), seen = S.prefetched || (S.prefetched = new Set());
+      const b = S.map.getBounds();
+      for (const zz of [z + 1, z - 1]) {
+        if (zz < (m.minNativeZoom ?? -2) || zz > (m.maxNativeZoom ?? 3)) continue;
+        const nw = S.map.project(b.getNorthWest(), zz), se = S.map.project(b.getSouthEast(), zz);
+        const s2 = 2 ** zz, maxX = Math.ceil(S.W * s2 / 256) - 1, maxY = Math.ceil(S.H * s2 / 256) - 1;
+        const x0 = Math.max(0, Math.floor(nw.x / 256)), x1 = Math.min(maxX, Math.floor(se.x / 256));
+        const y0 = Math.max(0, Math.floor(nw.y / 256)), y1 = Math.min(maxY, Math.floor(se.y / 256));
+        if ((x1 - x0 + 1) * (y1 - y0 + 1) > 80) continue;
+        for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+          const url = L.Util.template(S.tileUrl, { z: zz, x, y });
+          if (seen.has(url)) continue;
+          seen.add(url); const img = new Image(); img.decoding = 'async'; img.src = url;
+        }
+      }
+    }, 350);
+  }
 
   // Make sure the map has a view and an up-to-date size before moving it.
   function ensureView() {
@@ -639,11 +698,25 @@
   }
 
   // Every place is a teardrop pin with its type's picture; the tip marks the spot.
+  // Found places get a faded pin with a green tick. Leaflet rebuilds the icon element whenever a
+  // marker is re-added, so "found" lives in the icon itself (one shared icon per type and state).
+  const icons = new Map();
+  function pinIcon(type, found) {
+    const key = type + (found ? ':f' : '');
+    if (!icons.has(key)) icons.set(key, L.divIcon({
+      className: `mk mk-${type}${found ? ' is-found' : ''}`, iconSize: [28, 36], iconAnchor: [14, 35],
+      html: typePin(type, found ? `<span class="tick">${TICK}</span>` : ''),
+    }));
+    return icons.get(key);
+  }
+  const groupOf = (p) => S.layerGroups.get(p.type) || S.layerGroups.get('landmark');
+
   function makeMarker(p) {
     const t = TYPES[p.type] || TYPES.landmark;
-    const icon = L.divIcon({ className: `mk mk-${p.type}`, iconSize: [28, 36], iconAnchor: [14, 35], html: typePin(p.type) });
-    const mk = L.marker(ll(p), { icon, title: p.name, keyboard: !!t.named, riseOnHover: true });
+    const mk = L.marker(ll(p), { icon: pinIcon(p.type, S.found.has(p.id)), title: p.name, keyboard: !!t.named, riseOnHover: true });
     mk.on('click', (e) => { L.DomEvent.stop(e); onMarker(p); });
+    // Right-click (or press and hold on a phone) ticks a place off without opening its card.
+    mk.on('contextmenu', (e) => { L.DomEvent.stop(e); e.originalEvent?.preventDefault(); toggleFound(p.id); });
     return mk;
   }
 
@@ -673,7 +746,8 @@
         <span class="cat-ico">${pin}</span><span class="cat-name">${esc(name)}</span>${n != null ? `<span class="n">${n}</span>` : ''}</button>`;
     const html = CAT_GROUPS.map(([title, ids]) => {
       const rows = ids.map((id) => {
-        if (id === ':ranges') return S.data.ranges ? row('data-ranges', pinHtml('#b5332a', 'paw'), 'Animal ranges', S.data.ranges.species.filter((sp) => sp.cells).length, false) : '';
+        if (id === ':ranges') return S.data.ranges ? row('data-ranges', pinHtml('#b5332a', 'paw'), 'Animal ranges', S.data.ranges.species.filter((sp) => sp.cells && sp.kind !== 'plant').length, false) : '';
+        if (id === ':plants') return S.data.ranges?.species.some((sp) => sp.kind === 'plant') ? row('data-plants', pinHtml('#3f8a3a', 'leaf'), 'Plants & herbs', S.data.ranges.species.filter((sp) => sp.kind === 'plant').length, false) : '';
         if (id === ':grid') return row('data-grid', pinHtml('#8b7760', 'grid'), 'Atlas grid', null, false);
         if (!counts.get(id)) return '';
         return row(`data-layer="${id}"`, typePin(id), names.get(id) || TYPES[id].label, counts.get(id), visible.has(id));
@@ -690,7 +764,12 @@
     };
     list.addEventListener('click', (e) => {
       const hr = e.target.closest('[data-ranges]');
-      if (hr) { S.range ? hideRange() : showRange(S.lastRange || 'all'); setDrawer(false); return; }
+      const hp = e.target.closest('[data-plants]');
+      if (hr || hp) {
+        const kind = hp ? 'plant' : 'animal';
+        S.range && kindOf(S.range) === kind ? hideRange() : showRange(S.lastRange[kind]);
+        setDrawer(false); return;
+      }
       const g = e.target.closest('[data-grid]');
       if (g) { const on = g.getAttribute('aria-pressed') !== 'true'; g.setAttribute('aria-pressed', String(on)); on ? S.gridLayer.addTo(S.map) : S.gridLayer.remove(); return; }
       const b = e.target.closest('[data-layer]'); if (!b) return;
@@ -698,6 +777,105 @@
     });
     $('#showAll').addEventListener('click', () => { $$('#catList [data-layer]').forEach((b) => setLayer(b, true)); save(); });
     $('#hideAll').addEventListener('click', () => { $$('#catList [data-layer]').forEach((b) => setLayer(b, false)); save(); });
+    initProgress();
+  }
+
+  /* ---------- progress: places ticked off as found (kept in this browser) ---------- */
+  const trackable = (p) => p && p.x != null && !NAME_ONLY.has(p.type);
+
+  function saveFound() { store.set('found', [...S.found]); }
+
+  function toggleFound(id, on = !S.found.has(id)) {
+    const p = S.places.get(id); if (!trackable(p)) return;
+    on ? S.found.add(id) : S.found.delete(id);
+    saveFound();
+    refreshMarker(p);
+    renderProgress();
+    if (S.selected === id && !$('#placeCard').hidden) renderFoundBtn(p);
+  }
+
+  // Swap the pin's icon for the found / not-found one, and hide it when "Hide found" is on.
+  function refreshMarker(p) {
+    const mk = S.markerOf.get(p.id); if (!mk) return;
+    const found = S.found.has(p.id), grp = groupOf(p);
+    mk.setIcon(pinIcon(p.type, found));
+    if (S.hideFound && found && S.selected !== p.id) grp.removeLayer(mk);
+    else if (!grp.hasLayer(mk)) grp.addLayer(mk);
+    if (S.selected === p.id && mk._icon) mk._icon.classList.add('is-sel');
+  }
+
+  function renderProgress() {
+    const tot = new Map(), got = new Map();
+    let all = 0, done = 0;
+    for (const p of S.data.places) {
+      if (!trackable(p)) continue;
+      const f = S.found.has(p.id) ? 1 : 0;
+      tot.set(p.type, (tot.get(p.type) || 0) + 1); got.set(p.type, (got.get(p.type) || 0) + f);
+      all++; done += f;
+    }
+    const pct = all ? (done / all) * 100 : 0;
+    $('#pgNum').textContent = `${done} / ${all}`;
+    $('#pgPct').textContent = `${pct < 1 && done ? pct.toFixed(1) : Math.floor(pct)}%`;
+    $('#pgBar').style.width = `${pct}%`;
+    for (const b of $$('#catList [data-layer]')) {
+      const t = b.dataset.layer, n = tot.get(t) || 0, g = got.get(t) || 0;
+      const el = $('.n', b); if (!el) continue;
+      el.textContent = g ? `${g}/${n}` : String(n);
+      b.classList.toggle('is-done', !!n && g === n);
+      b.style.setProperty('--pct', `${n ? (g / n) * 100 : 0}%`);
+    }
+    $('#pgReset').disabled = !done;
+  }
+
+  function initProgress() {
+    const hide = $('#hideFound');
+    hide.checked = S.hideFound;
+    hide.addEventListener('change', () => {
+      S.hideFound = hide.checked; store.set('hideFound', S.hideFound);
+      for (const id of S.found) { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); }
+    });
+    $('#pgExport').addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify({ app: 'campfire', saved: new Date().toISOString(), found: [...S.found] }, null, 1)], { type: 'application/json' });
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'campfire-progress.json' });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    const file = $('#pgFile');
+    $('#pgImport').addEventListener('click', () => file.click());
+    file.addEventListener('change', async () => {
+      const f = file.files[0]; file.value = ''; if (!f) return;
+      let ids;
+      try { const j = JSON.parse(await f.text()); ids = Array.isArray(j) ? j : j.found; } catch { ids = null; }
+      if (!Array.isArray(ids)) { alert("That file doesn't look like a Campfire progress file."); return; }
+      const fresh = ids.filter((id) => trackable(S.places.get(id)) && !S.found.has(id));
+      for (const id of fresh) S.found.add(id);
+      saveFound(); fresh.forEach((id) => refreshMarker(S.places.get(id))); renderProgress();
+      alert(fresh.length ? `Added ${fresh.length} found place${fresh.length === 1 ? '' : 's'}.` : 'Nothing new: those places were already marked.');
+    });
+    $('#pgReset').addEventListener('click', () => {
+      if (!S.found.size || !confirm(`Clear all ${S.found.size} found places? (Export first if you want a copy.)`)) return;
+      const was = [...S.found]; S.found.clear(); saveFound();
+      was.forEach((id) => { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); });
+      renderProgress();
+      if (S.selected && !$('#placeCard').hidden) renderFoundBtn(S.places.get(S.selected));
+    });
+    // Another tab marked something: pick it up.
+    window.addEventListener('storage', (e) => {
+      if (e.key !== 'campfire:found') return;
+      const next = new Set(store.get('found', []));
+      const changed = [...new Set([...S.found, ...next])].filter((id) => S.found.has(id) !== next.has(id));
+      S.found = next;
+      changed.forEach((id) => { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); });
+      renderProgress();
+    });
+    renderProgress();
+  }
+
+  function renderFoundBtn(p) {
+    const b = $('#placeCard .pc-found'); if (!b) return;
+    const on = S.found.has(p.id);
+    b.setAttribute('aria-pressed', String(on));
+    b.innerHTML = `<span class="pf-box">${TICK}</span><span>${on ? 'Found' : 'Mark as found'}</span>`;
   }
 
   function ensureLayer(type) {
@@ -724,7 +902,16 @@
   }
 
   /* ---------- animal ranges: red dots from the guide's habitat maps ---------- */
-  const RANGE_RED = '#d8352a';
+  const RANGE_RED = '#f2553f';
+  // Animals are coral with a dusky glow; plants green with a dark green one.
+  const KIND = {
+    animal: { fill: RANGE_RED, glow: '92, 40, 118', label: 'Animal range', icon: 'paw', hide: 'Hide animal ranges' },
+    plant: { fill: '#5cb547', glow: '20, 66, 28', label: 'Where it grows', icon: 'leaf', hide: 'Hide plant areas' },
+  };
+  // Range keys: "all", "g:<group>" or "animal-<slug>" for animals; "plants" or "plant-<slug>" for plants.
+  const kindOf = (key) => (key === 'plants' || key.startsWith('plant-') ? 'plant' : 'animal');
+  const isMulti = (key) => key === 'all' || key === 'plants' || key.startsWith('g:');
+  const spName = (sp) => sp.name || S.topics.get(sp.topic)?.title || sp.topic;                      // coral; soft edge and glow are baked into the range image
 
   function initRanges() {
     if (!S.data.ranges) return;
@@ -733,154 +920,256 @@
     const pane = S.map.createPane('ranges');
     pane.style.zIndex = 350;                        // above the base map, below every pin
     pane.style.pointerEvents = 'none';
-    S.rangeRenderer = L.canvas({ pane: 'ranges', padding: 0.3 });
     S.rangeLayer = L.layerGroup();
-    renderRangePanel();
+    $('#rangePanel').addEventListener('click', (e) => { const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, true); });
   }
 
-  // Each species grid is a base64 bitmask, row by row: bit set = the guide marks it in that cell.
+  // The detailed ranges (outlines + 4-unit grids) live in their own file, fetched the first
+  // time a range is opened; data.json only lists the species.
+  function loadRanges() {
+    if (!S.rangeFull) {
+      const f = S.data.ranges.file || 'ranges.json', v = S.data.map.rangesV;
+      S.rangeFull = fetch(v ? `${f}?v=${v}` : f, v ? {} : { cache: 'no-cache' })
+        .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then((full) => { for (const sp of full.species) Object.assign(S.ranges.get(sp.topic) || {}, sp); S.rangeGrid = full; return full; });
+    }
+    return S.rangeFull;
+  }
+
+  // Grid: run-length encoded (off/on runs, row by row, LEB128 varints, base64), 4-unit cells.
   function rangeCells(sp) {
     if (!sp.bits) {
-      const { cols, rows } = S.data.ranges; const bin = atob(sp.grid);
+      const { cols, rows } = S.rangeGrid; const bin = atob(sp.rle || '');
       sp.bits = new Uint8Array(cols * rows);
-      for (let i = 0; i < sp.bits.length; i++) sp.bits[i] = (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+      const on = [];
+      let pos = 0, val = 0, v = 0, sh = 0;
+      for (let i = 0; i < bin.length; i++) {
+        const x = bin.charCodeAt(i); v |= (x & 0x7f) << sh; sh += 7;
+        if (x & 0x80) continue;
+        if (val) { sp.bits.fill(1, pos, pos + v); on.push(pos, v); }
+        pos += v; val ^= 1; v = 0; sh = 0;
+      }
+      sp.onRuns = on;
     }
     return sp.bits;
   }
 
-  // A range key is one species ("animal-wolf"), a group ("g:Birds") or every species ("all").
+  // Outline rings, delta-encoded in half map units: [x0, y0, dx1, dy1, ...] -> Leaflet latlngs.
+  function rangeRings(sp) {
+    if (!sp.latlngs) {
+      sp.latlngs = (sp.rings || []).map((r) => {
+        const out = []; let x = 0, y = 0;
+        for (let i = 0; i < r.length; i += 2) { x += r[i]; y += r[i + 1]; out.push([-y / 2, x / 2]); }
+        return out;
+      });
+    }
+    return sp.latlngs;
+  }
+
+  // A range key is one species ("animal-wolf", "plant-yarrow"), a group ("g:Birds") or every
+  // animal ("all") / every plant ("plants").
   function rangeSet(key) {
     const all = S.data.ranges.species;
-    if (key === 'all') return all;
+    if (key === 'all') return all.filter((sp) => sp.kind !== 'plant');
+    if (key === 'plants') return all.filter((sp) => sp.kind === 'plant');
     if (key.startsWith('g:')) return all.filter((sp) => sp.group === key.slice(2));
     return S.ranges.has(key) ? [S.ranges.get(key)] : [];
   }
 
-  // Count the chosen species in each cell; keep the occupied cells and their extent.
+  // One species: its outline. Several: species counted per 16-unit spot (a spot counts for a
+  // species when at least 3 of its 16 grid cells are in that species' range).
   function rangeDots(key) {
-    if (S.rangeCache.has(key)) return S.rangeCache.get(key);
-    const { cols, rows, cell } = S.data.ranges;
+    if (S.rangeCache.has(key)) { const r = S.rangeCache.get(key); S.rangeCache.delete(key); S.rangeCache.set(key, r); return r; }
+    const multi = isMulti(key);
     const set = rangeSet(key).filter((sp) => sp.cells);
-    const count = new Uint8Array(cols * rows);
-    for (const sp of set) { const b = rangeCells(sp); for (let i = 0; i < b.length; i++) count[i] += b[i]; }
-    const dots = []; let peak = 0, c0 = cols, c1 = -1, r0 = rows, r1 = -1;
-    for (let i = 0; i < count.length; i++) {
-      if (!count[i]) continue;
-      const c = i % cols, r = (i / cols) | 0;
-      dots.push([c, r, count[i]]);
-      peak = Math.max(peak, count[i]);
-      c0 = Math.min(c0, c); c1 = Math.max(c1, c); r0 = Math.min(r0, r); r1 = Math.max(r1, r);
+    let res;
+    if (!multi) {
+      const rings = set.length ? rangeRings(set[0]) : [];
+      const bounds = rings.length ? L.latLngBounds(rings.flat()) : null;
+      res = { rings, bounds, empty: !rings.length };
+    } else {
+      const { cols, rows, cell } = S.rangeGrid; const F = 4;        // grid cells per spot side
+      const cc = cols / F, cr = rows / F, count = new Uint8Array(cc * cr);
+      const n = new Uint8Array(cc * cr);
+      for (const sp of set) {
+        rangeCells(sp); n.fill(0);
+        const runs = sp.onRuns;
+        for (let j = 0; j < runs.length; j += 2) {
+          for (let i = runs[j], e = i + runs[j + 1]; i < e; i++) n[((i / cols / F) | 0) * cc + (((i % cols) / F) | 0)]++;
+        }
+        for (let k = 0; k < n.length; k++) if (n[k] >= 3) count[k]++;
+      }
+      const dots = []; let peak = 0, c0 = cc, c1 = -1, r0 = cr, r1 = -1;
+      for (let i = 0; i < count.length; i++) {
+        if (!count[i]) continue;
+        const c = i % cc, r = (i / cc) | 0;
+        dots.push([c, r, count[i]]); peak = Math.max(peak, count[i]);
+        c0 = Math.min(c0, c); c1 = Math.max(c1, c); r0 = Math.min(r0, r); r1 = Math.max(r1, r);
+      }
+      const sz = cell * F;
+      res = { dots, peak, size: sz, empty: !dots.length,
+        bounds: dots.length ? L.latLngBounds([-(r1 + 1) * sz, c0 * sz], [-r0 * sz, (c1 + 1) * sz]) : null };
     }
-    const bounds = dots.length ? L.latLngBounds([-(r1 + 1) * cell, c0 * cell], [-r0 * cell, (c1 + 1) * cell]) : null;
-    const res = { dots, peak, bounds };
     S.rangeCache.set(key, res);
+    // keep only the most recent ranges' drawings in memory
+    if (S.rangeCache.size > 8) S.rangeCache.delete(S.rangeCache.keys().next().value);
     return res;
   }
 
-  // One species: solid red patches with smooth edges, like the guide's own maps.
-  // Several species: one dot per cell, bigger and stronger where more of them live.
+  // Ranges are drawn once into an image (soft edge and dusky glow baked in) and shown as an image
+  // overlay, which the browser simply scales while you pan and zoom: no per-frame redrawing.
+  // Like L.imageOverlay, but shows a canvas element directly (no image encoding).
+  const CanvasOverlay = L.ImageOverlay.extend({
+    _initImage() {
+      const el = (this._image = this._url);
+      L.DomUtil.addClass(el, 'leaflet-image-layer');
+      if (this._zoomAnimated) L.DomUtil.addClass(el, 'leaflet-zoom-animated');
+      if (this.options.className) L.DomUtil.addClass(el, this.options.className);
+      el.onselectstart = L.Util.falseFn; el.onmousemove = L.Util.falseFn;
+    },
+  });
   function drawRange(key, res, multi) {
-    const cell = S.data.ranges.cell;
     S.rangeLayer.clearLayers();
-    if (!multi) {
-      if (res.dots.length) S.rangeLayer.addLayer(L.imageOverlay(rangePatches(key, res), S.homeBounds, { pane: 'ranges', interactive: false }));
-    } else {
-      for (const [c, r, n] of res.dots) {
-        const t = n / res.peak;
-        S.rangeLayer.addLayer(L.circle([-(r + 0.5) * cell, (c + 0.5) * cell], {
-          radius: cell * (0.12 + 0.4 * t), renderer: S.rangeRenderer, interactive: false,
-          stroke: false, fillColor: RANGE_RED, fillOpacity: 0.35 + 0.65 * t,
-        }));
-      }
+    if (!res.empty) {
+      const { el, bounds } = rangeImage(key, res, multi);
+      S.rangeLayer.addLayer(new CanvasOverlay(el, bounds, { pane: 'ranges', interactive: false, className: `range-img range-${kindOf(key)}` }));
     }
     S.rangeLayer.addTo(S.map);
   }
 
-  // Blur the species' cells a little and cut at half height: neighbouring cells merge into
-  // round-edged patches, and a lone cell stays a dot of about its own size.
-  function rangePatches(key, res) {
-    if (res.url) return res.url;
-    const { cols, rows } = S.data.ranges; const UP = 12;            // image pixels per cell
-    const w = cols * UP, h = rows * UP;
-    const on = new Uint8Array(cols * rows); for (const [c, r] of res.dots) on[r * cols + c] = 1;
-    let f = new Float32Array(w * h);
-    for (let y = 0; y < h; y++) { const row = ((y / UP) | 0) * cols; for (let x = 0; x < w; x++) f[y * w + x] = on[row + ((x / UP) | 0)]; }
-    f = boxBlur(boxBlur(f, w, h, 6), w, h, 6);
-    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-    const ctx = cv.getContext('2d'); const img = ctx.createImageData(w, h); const d = img.data;
-    for (let i = 0; i < f.length; i++) {
-      const a = Math.min(1, Math.max(0, (f[i] - 0.32) / 0.16));     // soft threshold = anti-aliased edge
-      if (!a) continue;
-      d[i * 4] = 216; d[i * 4 + 1] = 53; d[i * 4 + 2] = 42; d[i * 4 + 3] = 255 * a;
+  function rangeImage(key, res, multi) {
+    if (res.img) return res.img;
+    const pad = 14;                                                  // map units of room for the glow
+    let x0, y0, x1, y1;
+    if (multi) { x0 = 0; y0 = 0; x1 = S.W; y1 = S.H; }
+    else {
+      const b = res.bounds; x0 = Math.max(0, b.getWest() - pad); x1 = Math.min(S.W, b.getEast() + pad);
+      y0 = Math.max(0, -b.getNorth() - pad); y1 = Math.min(S.H, -b.getSouth() + pad);
     }
-    ctx.putImageData(img, 0, 0);
-    return (res.url = cv.toDataURL());
+    // pixels per map unit: sharp enough up close, but never a huge canvas (phones)
+    const cap = desktop.matches ? 2048 : 1400;                      // largest canvas side, px
+    const k = Math.max(0.4, Math.min(multi ? (desktop.matches ? 0.9 : 0.6) : 2.5, cap / Math.max(x1 - x0, y1 - y0)));
+    const w = Math.ceil((x1 - x0) * k), h = Math.ceil((y1 - y0) * k);
+    const shape = document.createElement('canvas'); shape.width = w; shape.height = h;
+    const g = shape.getContext('2d');
+    g.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
+    const K = KIND[kindOf(key)];
+    g.fillStyle = K.fill;
+    if (!multi) {
+      g.beginPath();
+      for (const ring of res.rings) {
+        ring.forEach(([lat, lng], i) => (i ? g.lineTo(lng, -lat) : g.moveTo(lng, -lat)));
+        g.closePath();
+      }
+      g.fill('evenodd');
+    } else {
+      for (const [c, r, n] of res.dots) {
+        const t = n / res.peak;
+        g.globalAlpha = 0.35 + 0.65 * t;
+        g.beginPath(); g.arc((c + 0.5) * res.size, (r + 0.5) * res.size, res.size * (0.12 + 0.4 * t), 0, 2 * Math.PI); g.fill();
+      }
+      g.globalAlpha = 1;
+    }
+    // glow behind, then a light feather on the edge
+    const out = document.createElement('canvas'); out.width = w; out.height = h;
+    const o = out.getContext('2d');
+    o.shadowColor = `rgba(${K.glow}, 0.9)`; o.shadowBlur = Math.max(4, 3.5 * k * (multi ? 1 : 1.2));
+    o.drawImage(shape, 0, 0);
+    o.shadowBlur = Math.max(10, 9 * k); o.shadowColor = `rgba(${K.glow}, 0.4)`; o.globalCompositeOperation = 'destination-over';
+    o.drawImage(shape, 0, 0);
+    let final = out;
+    if ('filter' in o) {
+      const soft = document.createElement('canvas'); soft.width = w; soft.height = h;
+      const sc = soft.getContext('2d'); sc.filter = `blur(${Math.max(1, 1.2 * k).toFixed(1)}px)`; sc.drawImage(out, 0, 0);
+      final = soft;
+    }
+    res.img = { el: final, bounds: L.latLngBounds([-y1, x0], [-y0, x1]) };
+    return res.img;
   }
 
-  function boxBlur(src, w, h, r) {
-    const tmp = new Float32Array(src.length), out = new Float32Array(src.length), k = 2 * r + 1;
-    for (let y = 0; y < h; y++) {
-      const o = y * w; let acc = 0;
-      for (let x = -r; x <= r; x++) acc += src[o + Math.min(w - 1, Math.max(0, x))];
-      for (let x = 0; x < w; x++) { tmp[o + x] = acc / k; acc += src[o + Math.min(w - 1, x + r + 1)] - src[o + Math.max(0, x - r)]; }
-    }
-    for (let x = 0; x < w; x++) {
-      let acc = 0;
-      for (let y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
-      for (let y = 0; y < h; y++) { out[y * w + x] = acc / k; acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x]; }
-    }
-    return out;
-  }
-
-  function renderRangePanel() {
-    const R = S.data.ranges;
-    const ORDER = ['Mammals', 'Birds', 'Reptiles & amphibians', 'Livestock'];
-    const rank = (g) => (ORDER.includes(g) ? ORDER.indexOf(g) : ORDER.length);
-    const groups = [...new Set(R.species.map((sp) => sp.group))].sort((a, b) => rank(a) - rank(b));
-    const mapped = (g) => R.species.filter((sp) => sp.cells && (!g || sp.group === g)).length;
-    const name = (sp) => S.topics.get(sp.topic)?.title || sp.topic;
+  // The picker under the map lists either the animals or the plants, whichever is showing.
+  function renderRangePanel(kind) {
+    S.panelKind = kind;
+    const all = S.data.ranges.species;
     const opt = (v, label) => `<option value="${esc(v)}">${esc(label)}</option>`;
-    const together = [opt('all', `All animals (${mapped()} species)`)]
-      .concat(groups.filter((g) => mapped(g) > 1).map((g) => opt('g:' + g, `All ${g.toLowerCase()} (${mapped(g)})`)));
-    const bySpecies = groups.map((g) => `<optgroup label="${esc(g)}">${R.species.filter((sp) => sp.group === g)
-      .sort((a, b) => name(a).localeCompare(name(b)))
-      .map((sp) => opt(sp.topic, name(sp) + (sp.cells ? '' : ' (Guarma only)'))).join('')}</optgroup>`);
+    const byName = (a, b) => spName(a).localeCompare(spName(b));
+    let options;
+    if (kind === 'plant') {
+      const plants = all.filter((sp) => sp.kind === 'plant');
+      const list = (ref) => plants.filter((sp) => sp.ref === ref).sort(byName)
+        .map((sp) => opt(sp.topic, spName(sp) + (sp.cells ? '' : ' (almost everywhere)'))).join('');
+      options = `<optgroup label="Together">${opt('plants', `All plants (${plants.filter((sp) => sp.cells).length} mapped)`)}</optgroup>`
+        + `<optgroup label="Herbs">${list('herbs')}</optgroup><optgroup label="Berries &amp; mushrooms">${list('provisions')}</optgroup>`;
+    } else {
+      const animals = all.filter((sp) => sp.kind !== 'plant');
+      const ORDER = ['Mammals', 'Birds', 'Reptiles & amphibians', 'Livestock'];
+      const rank = (g) => (ORDER.includes(g) ? ORDER.indexOf(g) : ORDER.length);
+      const groups = [...new Set(animals.map((sp) => sp.group))].sort((a, b) => rank(a) - rank(b));
+      const mapped = (g) => animals.filter((sp) => sp.cells && (!g || sp.group === g)).length;
+      const together = [opt('all', `All animals (${mapped()} species)`)]
+        .concat(groups.filter((g) => mapped(g) > 1).map((g) => opt('g:' + g, `All ${g.toLowerCase()} (${mapped(g)})`)));
+      options = `<optgroup label="Groups">${together.join('')}</optgroup>` + groups.map((g) => `<optgroup label="${esc(g)}">${animals.filter((sp) => sp.group === g)
+        .sort(byName).map((sp) => opt(sp.topic, spName(sp) + (sp.cells ? '' : ' (Guarma only)'))).join('')}</optgroup>`).join('');
+    }
+    const K = KIND[kind];
     const panel = $('#rangePanel');
+    panel.dataset.kind = kind;
     panel.innerHTML = `
       <div class="rp-head">
-        <span class="rp-ico">${ICONS.paw}</span>
+        <span class="rp-ico">${ICONS[K.icon]}</span>
         <div class="rp-pick">
-          <label class="rp-label" for="rangeSel">Animal range</label>
-          <select id="rangeSel"><optgroup label="Groups">${together.join('')}</optgroup>${bySpecies.join('')}</select>
+          <label class="rp-label" for="rangeSel">${K.label}</label>
+          <select id="rangeSel">${options}</select>
         </div>
-        <button class="rp-close" type="button" aria-label="Hide animal ranges">${ICONS.close}</button>
+        <button class="rp-close" type="button" aria-label="${K.hide}">${ICONS.close}</button>
       </div>
       <div class="rp-legend"></div>
       <p class="rp-note" id="rpNote" aria-live="polite"></p>`;
     $('#rangeSel').addEventListener('change', (e) => showRange(e.target.value, { fit: true }));
     $('.rp-close', panel).addEventListener('click', hideRange);
-    panel.addEventListener('click', (e) => { const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, true); });
   }
 
   function showRange(key, opts = {}) {
-    if (!S.ranges || !(key === 'all' || key.startsWith('g:') || S.ranges.has(key))) return;
-    S.range = S.lastRange = key;
+    if (!S.ranges || !(isMulti(key) || S.ranges.has(key))) return;
+    const kind = kindOf(key);
+    S.range = S.lastRange[kind] = key;
+    if (S.panelKind !== kind) renderRangePanel(kind);
     if (!desktop.matches) setView('map');
-    const multi = key === 'all' || key.startsWith('g:');
+    if (!S.rangeGrid) {                                  // first range: fetch the detailed file
+      $('#rangePanel').hidden = false; $('#rangeSel').value = key;
+      $('.rp-legend').hidden = true; $('#rpNote').textContent = 'Loading the range…';
+      loadRanges().then(() => { if (S.range === key) showRange(key, opts); })
+        .catch(() => { $('#rpNote').textContent = "Couldn't load the ranges. Check your connection and try again."; S.rangeFull = null; });
+      return;
+    }
+    const multi = isMulti(key);
     const res = rangeDots(key);
     drawRange(key, res, multi);
 
     $('#rangePanel').hidden = false;
-    $('#catList [data-ranges]')?.setAttribute('aria-pressed', 'true');
+    $('#catList [data-ranges]')?.setAttribute('aria-pressed', String(kind === 'animal'));
+    $('#catList [data-plants]')?.setAttribute('aria-pressed', String(kind === 'plant'));
     $('#rangeSel').value = key;
     const dot = (t) => `<i class="rdot" style="--s:${(3 + 10 * t).toFixed(1)}px;opacity:${(0.35 + 0.65 * t).toFixed(2)}"></i>`;
     const legend = $('.rp-legend');
-    legend.hidden = !res.dots.length;
+    legend.hidden = res.empty;
+    const unit = kind === 'plant' ? ['plant', 'plants'] : ['species', 'species'];
     legend.innerHTML = multi
-      ? `<span>1 species</span><span class="rp-dots">${[0.25, 0.5, 0.75, 1].map(dot).join('')}</span><span>${res.peak} species</span>`
-      : `<span class="rp-dots">${dot(1)}</span><span>Where the guide marks it</span>`;
+      ? `<span>1 ${unit[0]}</span><span class="rp-dots">${[0.25, 0.5, 0.75, 1].map(dot).join('')}</span><span>${res.peak} ${res.peak === 1 ? unit[0] : unit[1]}</span>`
+      : `<span class="rp-dots">${dot(1)}</span><span>${kind === 'plant' ? 'Where the guide says it grows' : 'Where the guide marks it'}</span>`;
     let note;
-    if (multi) note = "Bigger, stronger dots mean more species live there. From the guide's habitat maps, pp. 149–161.";
+    if (kind === 'plant') {
+      const APPROX = "The guide has no plant maps, so these areas follow its written descriptions and are approximate.";
+      if (multi) {
+        const everywhere = rangeSet('plants').filter((sp) => !sp.cells).length;
+        note = `Bigger, stronger dots mean more kinds of plant grow there (pp. 305–306). ${everywhere} more grow almost everywhere. ${APPROX}`;
+      } else {
+        const sp = S.ranges.get(key);
+        note = `<b>${esc(spName(sp))}</b>: ${esc(sp.where)} `
+          + (sp.cells ? APPROX : "The guide doesn't narrow it down to one area, so there's nothing to shade.")
+          + ` <button class="textbtn" type="button" data-topic="${esc(sp.ref)}">Guide p. ${sp.page}</button>`;
+      }
+    } else if (multi) note = "Bigger, stronger dots mean more species live there. From the guide's habitat maps, pp. 149–161.";
     else {
       const sp = S.ranges.get(key); const t = S.topics.get(key);
       note = sp.cells ? `${esc(t.title)}: from the guide's habitat map, p. ${sp.page}.${sp.guarma ? ' Also found on Guarma.' : ''}`
@@ -903,6 +1192,7 @@
     S.rangeLayer.clearLayers(); S.rangeLayer.remove();
     $('#rangePanel').hidden = true;
     $('#catList [data-ranges]')?.setAttribute('aria-pressed', 'false');
+    $('#catList [data-plants]')?.setAttribute('aria-pressed', 'false');
     if (location.hash.startsWith('#range=')) history.replaceState(null, '', location.pathname + location.search);
   }
 
@@ -974,25 +1264,33 @@
       <button class="pc-close" type="button" aria-label="Close">${ICONS.close}</button>
       <span class="pc-type" style="--c:${t.color}"><span class="dot"></span>${esc(t.label)}${p.num ? ` · no. ${esc(p.num)}` : ''}</span>
       <h2>${esc(p.name)}</h2>
+      ${trackable(p) ? '<button class="pc-found" type="button" aria-pressed="false"></button>' : ''}
       <p>${esc(p.description || '')}</p>
       <div class="pc-src">${src}${p.approx ? '<span class="mono pc-approx">Approximate position</span>' : ''}</div>
       ${related.length ? `<div class="pc-topics"><h3>In the guide</h3>${related.map((tp) => `<button class="pc-link" type="button" data-topic="${esc(tp.id)}"><span>${esc(tp.title)}</span><span>${pageLabel(tp)}</span></button>`).join('')}</div>` : ''}`;
     card.hidden = false;
     card.scrollTop = 0;
     $('.pc-close', card).onclick = closePlace;
-    card.onclick = (e) => { const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, true); };
+    renderFoundBtn(p);
+    card.onclick = (e) => {
+      if (e.target.closest('.pc-found')) { toggleFound(p.id); return; }
+      const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, true);
+    };
     history.replaceState(null, '', '#place=' + encodeURIComponent(id));
     if (p.x == null && !desktop.matches) setView('map');
   }
 
   function selectMarker(id) {
-    if (S.selected) {
-      const old = S.markerOf.get(S.selected);
+    const prev = S.selected;
+    if (prev) {
+      const old = S.markerOf.get(prev);
       old?.setZIndexOffset?.(0);
       if (old?._icon) old._icon.classList.remove('is-sel');
     }
     S.selected = id;
+    if (prev && prev !== id && S.hideFound && S.found.has(prev)) refreshMarker(S.places.get(prev));   // tuck it away again
     const mk = S.markerOf.get(id);
+    if (mk && S.hideFound && S.found.has(id)) refreshMarker(S.places.get(id));                        // show it while open
     if (mk?._icon) { mk._icon.classList.add('is-sel'); mk.setZIndexOffset(1000); }
   }
 

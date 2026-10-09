@@ -68,6 +68,23 @@
       </div>
 
       <section class="sb-panel sb-map" id="panelMap" aria-label="Map categories">
+        <div class="progress" aria-label="Your progress">
+          <div class="pg-head">
+            <span class="pg-title">Progress</span>
+            <span class="pg-num"><span id="pgNum">0 / 0</span> found · <b id="pgPct">0%</b></span>
+          </div>
+          <div class="pg-bar" aria-hidden="true"><span id="pgBar"></span></div>
+          <div class="pg-tools">
+            <label class="pg-hide"><input type="checkbox" id="hideFound"> Hide found</label>
+            <span class="pg-io">
+              <button type="button" class="textbtn" id="pgExport" title="Save your progress to a file">Export</button>
+              <button type="button" class="textbtn" id="pgImport" title="Load progress from a file">Import</button>
+              <button type="button" class="textbtn" id="pgReset" title="Clear all found places">Reset</button>
+            </span>
+            <input type="file" id="pgFile" accept=".json,application/json" hidden>
+          </div>
+          <p class="pg-tip">Open a place and tap <b>Mark as found</b>, or right-click its pin (press and hold on a phone). Saved in this browser.</p>
+        </div>
         <div class="sb-actions">
           <button type="button" class="textbtn" id="showAll">Show all</button>
           <button type="button" class="textbtn" id="hideAll">Hide all</button>
