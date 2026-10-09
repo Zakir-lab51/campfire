@@ -4,96 +4,122 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Campfire · RDR2 Field Companion</title>
-  <meta name="description" content="Campfire is an unofficial, searchable companion to the Red Dead Redemption 2 Complete Official Guide: fuzzy search, an interactive map and every topic with its guide page.">
-  <meta name="theme-color" content="#0f1013">
+  <meta name="description" content="Campfire is an unofficial, searchable companion to the Red Dead Redemption 2 Complete Official Guide: an interactive map with every collectible, animal ranges, and every topic with its guide page.">
+  <meta name="theme-color" content="#e6d6b4">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314161c'/%3E%3Cpath d='M32 12c4 8 12 12 12 22a12 12 0 0 1-24 0c0-6 4-9 6-14 2 4 3 6 6 7-1-6-2-10 0-15z' fill='%23e07a2e'/%3E%3Cpath d='M18 50l28-6M46 50l-28-6' stroke='%23eadfcb' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <a class="skip" href="#guide">Skip to the guide</a>
+  <a class="skip" href="#sections">Skip to the guide</a>
 
-  <header class="topbar" id="topbar">
-    <div class="topbar-row">
-      <a class="brand" href="#" aria-label="Campfire home">
-        <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
-          <path class="flame" d="M20 4c3 6 9 9 9 17a9 9 0 0 1-18 0c0-5 3-7 4.5-11 1.5 3 2.3 4.5 4.5 5.2C19.2 10.7 18.5 8 20 4z"/>
-          <path class="logs" d="M8 35l24-5M32 35L8 30"/>
-        </svg>
-        <span class="brand-text">
-          <span class="brand-name">Campfire</span>
-          <span class="brand-sub">RDR2 field companion</span>
-        </span>
-      </a>
+  <div class="app" id="layout" data-view="map">
+    <header class="topbar" id="topbar">
+      <div class="topbar-row">
+        <a class="brand" href="#" aria-label="Campfire home">
+          <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+            <path class="flame" d="M20 4c3 6 9 9 9 17a9 9 0 0 1-18 0c0-5 3-7 4.5-11 1.5 3 2.3 4.5 4.5 5.2C19.2 10.7 18.5 8 20 4z"/>
+            <path class="logs" d="M8 35l24-5M32 35L8 30"/>
+          </svg>
+          <span class="brand-text">
+            <span class="brand-name">Campfire</span>
+            <span class="brand-sub">RDR2 interactive map &amp; guide</span>
+          </span>
+        </a>
+        <nav class="viewtabs" aria-label="Switch view">
+          <button type="button" data-view="map" aria-pressed="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg>Map
+          </button>
+          <button type="button" data-view="guide" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></svg>Guide
+          </button>
+        </nav>
+      </div>
 
       <div class="search" role="search">
         <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
         <input id="q" type="search" autocomplete="off" spellcheck="false"
-               placeholder="Search the guide, e.g. legendary bear"
-               aria-label="Search the guide" aria-controls="results" aria-expanded="false">
+               placeholder="Search, e.g. legendary bear or orchid"
+               aria-label="Search the guide and map" aria-controls="results" aria-expanded="false">
         <kbd class="search-kbd" aria-hidden="true">/</kbd>
         <button class="search-clear" id="clear" type="button" aria-label="Clear search" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </div>
-    </div>
 
-    <div class="chips quick" id="quick" aria-label="Quick searches"></div>
+      <div class="chips quick" id="quick" aria-label="Quick searches"></div>
+      <div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+    </header>
 
-    <nav class="viewtabs" aria-label="Switch view">
-      <button type="button" data-view="map" aria-pressed="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg>Map
-      </button>
-      <button type="button" data-view="guide" aria-pressed="true">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></svg>Guide
-      </button>
-    </nav>
-
-    <div class="results glass" id="results" role="listbox" aria-label="Search results" hidden></div>
-  </header>
-
-  <main class="layout" id="layout" data-view="guide">
-    <section class="view view-map" id="mapView" aria-label="Interactive map">
-      <div id="map" class="map"></div>
-      <div class="layerbar glass" id="layerbar" aria-label="Map layers"></div>
-      <div class="map-hits glass" id="mapHits" hidden></div>
-      <aside class="placecard glass" id="placeCard" aria-live="polite" hidden></aside>
-    </section>
-
-    <section class="view view-guide" id="guide" aria-label="Guide">
-      <div class="guide-inner">
-        <section class="intro glass">
-          <p class="eyebrow">Unofficial companion to the Complete Official Guide</p>
-          <h1>The guide, by the fire.</h1>
-          <p class="lede" id="lede">Type what you need above, tap a place on the map, or browse every chapter below. Each topic shows the page of the printed guide it comes from.</p>
-          <dl class="stats" id="stats"></dl>
-        </section>
-
-        <section class="toc" aria-labelledby="toc-h">
-          <h2 class="section-h" id="toc-h">Contents</h2>
-          <ol class="toc-list" id="toc"></ol>
-        </section>
-
-        <section class="browse" aria-labelledby="browse-h">
-          <div class="browse-head">
-            <h2 class="section-h" id="browse-h">Browse</h2>
-            <span class="mono dim" id="filterCount"></span>
-          </div>
-          <div class="chips cats" id="cats" aria-label="Filter by category"></div>
-          <div id="sections"></div>
-        </section>
-
-        <footer class="foot">
-          <p id="disclaimer"></p>
-          <p class="mono dim" id="sourceLine"></p>
-        </footer>
+    <aside class="sidebar" id="sidebar" data-panel="map" aria-label="Map categories and guide">
+      <div class="sb-tabs" role="tablist" aria-label="Sidebar">
+        <button type="button" role="tab" data-panel="map" aria-selected="true">Map categories</button>
+        <button type="button" role="tab" data-panel="guide" aria-selected="false">The guide</button>
       </div>
-    </section>
-  </main>
+      <div class="sb-drawer-head">
+        <span>Map categories</span>
+        <button type="button" class="sb-close" id="drawerClose" aria-label="Close categories">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <section class="sb-panel sb-map" id="panelMap" aria-label="Map categories">
+        <div class="sb-actions">
+          <button type="button" class="textbtn" id="showAll">Show all</button>
+          <button type="button" class="textbtn" id="hideAll">Hide all</button>
+        </div>
+        <div id="catList"></div>
+        <p class="sb-tip">Tip: tap a name on the map, or any pin, to see what the guide says about it.</p>
+      </section>
+
+      <section class="sb-panel sb-guide view-guide" id="guide" aria-label="Guide">
+        <div class="guide-inner">
+          <section class="intro">
+            <p class="eyebrow">Unofficial companion to the Complete Official Guide</p>
+            <h1>The guide, by the fire.</h1>
+            <p class="lede" id="lede">Type what you need above, tap a place on the map, or browse every chapter below. Each topic shows the page of the printed guide it comes from.</p>
+            <dl class="stats" id="stats"></dl>
+          </section>
+
+          <section class="toc" aria-labelledby="toc-h">
+            <h2 class="section-h" id="toc-h">Contents</h2>
+            <ol class="toc-list" id="toc"></ol>
+          </section>
+
+          <section class="browse" aria-labelledby="browse-h">
+            <div class="browse-head">
+              <h2 class="section-h" id="browse-h">Browse</h2>
+              <span class="mono dim" id="filterCount"></span>
+            </div>
+            <div class="chips cats" id="cats" aria-label="Filter by category"></div>
+            <div id="sections"></div>
+          </section>
+
+          <footer class="foot">
+            <p id="disclaimer"></p>
+            <p class="mono dim" id="sourceLine"></p>
+          </footer>
+        </div>
+      </section>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <main class="view-map" id="mapView" aria-label="Interactive map">
+      <div id="map" class="map"></div>
+      <button type="button" class="map-fab" id="layersBtn" aria-controls="sidebar" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>Categories
+      </button>
+      <div class="map-bottom" id="mapBottom">
+        <div class="map-hits" id="mapHits" hidden></div>
+        <div class="range-panel" id="rangePanel" aria-label="Animal ranges" hidden></div>
+      </div>
+      <aside class="placecard" id="placeCard" aria-live="polite" hidden></aside>
+    </main>
+  </div>
 
   <noscript><p class="noscript">Campfire needs JavaScript to search and draw the map.</p></noscript>
 
