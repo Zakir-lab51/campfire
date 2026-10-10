@@ -136,6 +136,18 @@
           <div class="hf-animals" id="hfAnimals"></div>
           <div class="hf-pick" id="hfPick" hidden></div>
         </div>
+        <div class="my-marks" id="myMarks" aria-label="My markers">
+          <div class="mm-head">
+            <span class="mm-title">My markers</span>
+            <span class="mm-sub" id="mmCount"></span>
+            <button type="button" class="mm-eye" id="mmShow" aria-pressed="true" title="Show or hide them on the map" aria-label="Show my markers on the map">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <button type="button" class="mm-add" id="mmAdd"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add marker</button>
+          <ul class="mm-list" id="mmList"></ul>
+          <p class="mm-empty" id="mmEmpty">Press and hold the map (right-click with a mouse) to drop a marker there, or tap <b>Add marker</b>.</p>
+        </div>
         <div class="sb-actions">
           <button type="button" class="textbtn" id="showAll">Show all</button>
           <button type="button" class="textbtn" id="hideAll">Hide all</button>
@@ -193,6 +205,11 @@
         <div class="range-panel" id="rangePanel" aria-label="Animal ranges" hidden></div>
       </div>
       <aside class="placecard" id="placeCard" aria-live="polite" hidden></aside>
+      <div class="place-hint" id="placeHint" role="status" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
+        <span>Tap the map where your marker goes</span>
+        <button type="button" class="textbtn" id="placeCancel">Cancel</button>
+      </div>
       <button type="button" class="todo-toggle" id="todoToggle" aria-controls="todo" aria-expanded="false" aria-label="Show the to-do list" title="To-do list">
         <svg class="tt-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 12.5l3 3 5.5-6.5"/></svg>
         <span class="todo-badge" id="todoBadge" hidden></span>

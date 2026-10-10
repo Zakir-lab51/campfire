@@ -45,6 +45,10 @@
     el._leaveT = setTimeout(() => { el.hidden = true; el.classList.remove('is-leaving'); }, ms);
   }
   const isShown = (el) => !el.hidden && !el.classList.contains('is-leaving');
+  // Play a one-off CSS animation again (e.g. a tick's pop), even if it ran a moment ago.
+  function replay(el, cls) { if (!el || reduceMotion()) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+  // iPad and iPhone Safari only show :active (the press squeeze) when the page listens for touches.
+  document.addEventListener('touchstart', () => {}, { passive: true });
   // iPadOS Safari reports itself as a Mac, so check for touch too.
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
@@ -107,6 +111,8 @@
     target: '<circle cx="12" cy="12" r="6.6"/><circle class="f" cx="12" cy="12" r="2"/><path d="M12 2.6v4.2M12 17.2v4.2M2.6 12h4.2M17.2 12h4.2"/>',
     grid: '<path d="M4 4h16v16H4zM4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16"/>',
     leaf: '<path d="M5 19.5C4.6 11 9.6 4.8 20 4c.4 10.2-5.6 15.6-15 15.5z"/><path d="M5 19.5l8.6-8.6"/>',
+    flag: '<path d="M5.5 21V3.5"/><path d="M5.5 4h11l-2.4 3.8 2.4 3.8h-11"/>',
+    heart: '<path class="f" d="M12 20.3s-7.8-4.6-7.8-10.3A4.4 4.4 0 0 1 12 7.4a4.4 4.4 0 0 1 7.8 2.6c0 5.7-7.8 10.3-7.8 10.3z"/>',
   };
   const glyph = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[name] || GLYPHS.excl}</svg>`;
   const PIN = 'M14 35C12.6 29.5 2 22.5 2 13a12 12 0 0 1 24 0c0 9.5-10.6 16.5-12 22z';
@@ -390,7 +396,8 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === '/' && document.activeElement !== input && !/input|textarea/i.test(document.activeElement.tagName)) { e.preventDefault(); setSearchOpen(true); input.select(); }
       if (e.key === 'Escape') {
-        if (isShown($('#results'))) showResults(false);
+        if (S.placing) setPlacing(false);
+        else if (isShown($('#results'))) showResults(false);
         else if (isOpen()) setSearchOpen(false);
         else if ($('#layout').classList.contains('drawer-open')) setDrawer(false); else closePlace();
       }
@@ -431,7 +438,8 @@
     const tokens = queryTokens();
     const plants = S.ranges && tokens.length ? S.data.ranges.species.filter((sp) => sp.kind === 'plant'
       && tokens.every((t) => wordRanges(sp.name, [t]).length)).slice(0, 3) : [];
-    if (!topics.length && !places.length && !plants.length) {   // (hunting spots are places too)
+    const mine = tokens.length ? (S.marks || []).filter((m) => tokens.every((t) => `${m.name} ${m.note}`.toLowerCase().includes(t))).slice(0, 5) : [];
+    if (!topics.length && !places.length && !plants.length && !mine.length) {   // (hunting spots are places too)
       box.innerHTML = `<div class="results-empty">No matches for “${esc(q)}”. Try fewer or shorter words.</div>`;
       return;
     }
@@ -457,7 +465,8 @@
       && tokens.every((t) => wordRanges(r.item.title, [t]).length)).slice(0, 3) : [];
     const rGroup = (species.length ? `<div class="results-group"><h3>Animal ranges</h3></div>${species.map((r, i) => rangeRow(r.item.id, i)).join('')}` : '')
       + (plants.length ? `<div class="results-group"><h3>Where plants grow</h3></div>${plants.map((sp, i) => rangeRow(sp.topic, i)).join('')}` : '');
-    box.innerHTML = rGroup + hGroup + (placesFirst ? pGroup + tGroup : tGroup + pGroup);
+    const mGroup = mine.length ? `<div class="results-group"><h3>My markers · ${mine.length}</h3></div>${mine.map((m, i) => markRow(m, i)).join('')}` : '';
+    box.innerHTML = mGroup + rGroup + hGroup + (placesFirst ? pGroup + tGroup : tGroup + pGroup);
     S.activeResult = -1;
   }
 
@@ -512,6 +521,12 @@
     </button>`;
   }
 
+  const markRow = (m, i) => `<button class="result" type="button" role="option" data-kind="m" data-id="${esc(m.id)}" style="--c:${m.color};animation-delay:${i * 18}ms">
+      <span class="result-ico">${glyph(m.glyph)}</span>
+      <span><span class="result-title">${esc(markName(m))}</span><span class="result-snip">${esc(m.note.slice(0, 140))}</span></span>
+      <span class="result-meta">${esc(cellOf(m))}</span>
+    </button>`;
+
   function rangeRow(id, i) {
     const sp = S.ranges.get(id);
     if (sp.kind === 'plant') {
@@ -561,6 +576,7 @@
   function showResults(on) {
     const box = $('#results');
     const show = on && !!box.innerHTML;
+    if (show && !isShown(box)) { replay(box, 'is-fresh'); clearTimeout(box._freshT); box._freshT = setTimeout(() => box.classList.remove('is-fresh'), 700); }
     show ? showSoftly(box) : hideSoftly(box, 170);
     $('#q').setAttribute('aria-expanded', String(show));
   }
@@ -583,6 +599,7 @@
     setSearchOpen(false);                            // folds the field back; the words stay for next time
     if (el.dataset.kind === 't') openTopic(el.dataset.id, true);
     else if (el.dataset.kind === 'r') { setHits([]); showRange(el.dataset.id, { fit: true }); }   // the range dots, not search rings
+    else if (el.dataset.kind === 'm') showMark(el.dataset.id);
     else showPlace(el.dataset.id, true);
   }
 
@@ -590,6 +607,7 @@
   function bindViews() {
     $$('.viewtabs [data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
     $$('.sb-tabs [data-panel]').forEach((b) => b.addEventListener('click', () => setPanel(b.dataset.panel)));
+    initSegDrag($('.sb-tabs')); initSegDrag($('.viewtabs'));
     $('#layersBtn').addEventListener('click', () => setDrawer(true));
     $('#drawerClose').addEventListener('click', () => setDrawer(false));
     $('#scrim').addEventListener('click', () => setDrawer(false));
@@ -624,6 +642,52 @@
 
   // Move a segmented control's bright pill to the chosen tab.
   function slideSeg(seg, i) { if (seg && i >= 0) seg.style.setProperty('--i', i); }
+
+  // The pill can also be dragged, like iOS: press on the chosen tab and slide. It lifts a little,
+  // follows the finger (rubber-banding past the ends), lights up the tab beneath it, and on release
+  // springs onto the nearest tab and opens it. Taps work as before.
+  function initSegDrag(seg) {
+    if (!seg) return;
+    const btns = () => [...seg.querySelectorAll('button')];
+    const chosen = () => btns().findIndex((b) => b.getAttribute('aria-selected') === 'true' || b.getAttribute('aria-pressed') === 'true');
+    let drag = null, swallow = false;
+    seg.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const list = btns(), i = list.indexOf(e.target.closest('button'));
+      if (i < 0 || i !== chosen()) return;                       // drags start on the chosen tab; the others are taps
+      drag = { id: e.pointerId, x0: e.clientX, w: (seg.clientWidth - 8) / list.length, n: list.length, from: i, moved: false };
+      drag.base = i * drag.w;
+    });
+    seg.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.x0;
+      if (!drag.moved) {
+        if (Math.abs(dx) < 6) return;                               // a small wobble is still a tap
+        drag.moved = true; seg.classList.add('is-dragging');
+        try { seg.setPointerCapture(e.pointerId); } catch { /* keeps working without capture */ }
+      }
+      const max = drag.w * (drag.n - 1);
+      let x = drag.base + dx;
+      if (x < 0) x *= 0.25; else if (x > max) x = max + (x - max) * 0.25;       // rubber band past the ends
+      seg.style.setProperty('--x', `${x}px`);
+      drag.x = x;
+      const near = Math.max(0, Math.min(drag.n - 1, Math.round(x / drag.w)));
+      btns().forEach((b, k) => b.classList.toggle('is-under', k === near));
+    });
+    const end = (e, cancelled) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const d = drag; drag = null;
+      if (!d.moved) return;
+      const k = cancelled ? d.from : Math.max(0, Math.min(d.n - 1, Math.round((d.x ?? d.base) / d.w)));
+      seg.classList.remove('is-dragging');
+      btns().forEach((b) => b.classList.remove('is-under'));
+      if (k !== d.from) btns()[k].click();                         // the tab's own handler opens it and settles the pill
+      swallow = true; setTimeout(() => { swallow = false; }, 0);   // ...and the drag itself isn't also a tap
+    };
+    seg.addEventListener('pointerup', (e) => end(e, false));
+    seg.addEventListener('pointercancel', (e) => end(e, true));
+    seg.addEventListener('click', (e) => { if (swallow && e.isTrusted) { e.stopPropagation(); e.preventDefault(); } }, true);
+  }
 
   // Wide screens: fold the side panel away for a full-screen map (remembered per browser).
   function setPanelOpen(open, save) {
@@ -682,7 +746,9 @@
     requestAnimationFrame(() => { map.invalidateSize(); homeView(); });
     map.on('zoomend', zoomClass); zoomClass();
     map.on('resize', fitMinZoom);
-    map.on('click', () => closePlace());
+    map.on('click', (e) => { if (S.placing) { setPlacing(false); addMarkAt(e.latlng, true); return; } closePlace(); });
+    // press and hold an empty spot (right-click with a mouse) drops one of your own markers there
+    map.on('contextmenu', (e) => { e.originalEvent?.preventDefault?.(); if (S.placing) setPlacing(false); addMarkAt(e.latlng, false); });
 
     const visible = new Set(store.get('layers', null) || S.data.layers.filter((l) => l.default).map((l) => l.id));
     const known = store.get('layersKnown', null);
@@ -702,6 +768,7 @@
     renderCategories(visible);
     initRanges();
     renderTodo();                                   // its Range links need the ranges
+    initMarks();
     S.mapReady = true;
   }
 
@@ -924,7 +991,7 @@
       for (const id of S.found) { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); }
     });
     $('#pgExport').addEventListener('click', async () => {
-      const json = JSON.stringify({ app: 'campfire', saved: new Date().toISOString(), found: [...S.found], done: [...S.done], todo: S.todo }, null, 1);
+      const json = JSON.stringify({ app: 'campfire', saved: new Date().toISOString(), found: [...S.found], done: [...S.done], todo: S.todo, marks: S.marks }, null, 1);
       const name = 'campfire-progress.json';
       // On iPad/iPhone (and in the home-screen app) the share sheet is the reliable way to save a file.
       if (touch && navigator.canShare) {
@@ -942,8 +1009,8 @@
     file.addEventListener('change', async () => {
       const f = file.files[0]; file.value = ''; if (!f) return;
       let ids, done = [];
-      let todo = [];
-      try { const j = JSON.parse(await f.text()); ids = Array.isArray(j) ? j : j.found; done = Array.isArray(j.done) ? j.done : []; todo = Array.isArray(j.todo) ? j.todo : []; } catch { ids = null; }
+      let todo = [], marks = [];
+      try { const j = JSON.parse(await f.text()); ids = Array.isArray(j) ? j : j.found; done = Array.isArray(j.done) ? j.done : []; todo = Array.isArray(j.todo) ? j.todo : []; marks = Array.isArray(j.marks) ? j.marks : []; } catch { ids = null; }
       if (!Array.isArray(ids)) { alert("That file doesn't look like a Campfire progress file."); return; }
       const fresh = ids.filter((id) => trackable(S.places.get(id)) && !S.found.has(id));
       for (const id of fresh) S.found.add(id);
@@ -952,10 +1019,14 @@
       const have = new Set(S.todo.map((t) => t.id));
       const newTodos = todo.filter((t) => t && typeof t.id === 'string' && typeof t.text === 'string' && !have.has(t.id)).map(cleanTodo);
       if (newTodos.length) { S.todo.push(...newTodos); saveTodo(); renderTodo(); }
+      const haveM = new Set(S.marks.map((m) => m.id));
+      const newMarks = marks.filter((m) => m && typeof m.id === 'string' && Number.isFinite(+m.x) && Number.isFinite(+m.y) && !haveM.has(m.id)).map(cleanMark);
+      if (newMarks.length) { S.marks.push(...newMarks); newMarks.forEach(drawMark); saveMarks(); renderMarks(); }
       saveFound(); store.set('done', [...S.done]);
       fresh.forEach((id) => refreshMarker(S.places.get(id))); renderProgress(); syncHundred();
       const parts = [fresh.length && `${fresh.length} found place${fresh.length === 1 ? '' : 's'}`, ticks.length && `${ticks.length} checklist tick${ticks.length === 1 ? '' : 's'}`,
-        newTodos.length && `${newTodos.length} to-do item${newTodos.length === 1 ? '' : 's'}`].filter(Boolean);
+        newTodos.length && `${newTodos.length} to-do item${newTodos.length === 1 ? '' : 's'}`,
+        newMarks.length && `${newMarks.length} marker${newMarks.length === 1 ? '' : 's'}`].filter(Boolean);
       alert(parts.length ? `Added ${parts.join(' and ')}.` : 'Nothing new: all of that was already marked.');
     });
     $('#pgReset').addEventListener('click', () => {
@@ -1037,7 +1108,8 @@
       <p class="hd-src" style="margin-top:18px"><button type="button" class="textbtn" id="hdReset">Clear checklist ticks</button></p>`;
     $$('.hd-ch', box).forEach((d) => d.addEventListener('toggle', () => { if (d.open) renderChapter(d); }));
     box.onclick = (e) => {
-      const chk = e.target.closest('.hd-check'); if (chk) { toggleTask(chk.closest('.hd-task').dataset.id); return; }
+      const chk = e.target.closest('.hd-check');
+      if (chk) { toggleTask(chk.closest('.hd-task').dataset.id); if (chk.getAttribute('aria-pressed') === 'true') replay(chk, 'is-pop'); return; }
       const f = e.target.closest('[data-filter]');
       if (f) {
         box.dataset.filter = f.dataset.filter; store.set('hundredFilter', f.dataset.filter);
@@ -1140,7 +1212,11 @@
     const b = $('#placeCard .pc-found'); if (!b) return;
     const on = S.found.has(p.id);
     b.setAttribute('aria-pressed', String(on));
+    const was = b.getAttribute('data-on') === 'true';
+    b.setAttribute('data-on', String(on));
     b.innerHTML = `<span class="pf-box">${TICK}</span><span>${on ? 'Found' : 'Mark as found'}</span>`;
+    if (on && !was && b.dataset.ready) replay($('.pf-box', b), 'is-pop');      // a pop when it's ticked, not when the card opens
+    b.dataset.ready = '1';
   }
 
   function ensureLayer(type) {
@@ -1584,6 +1660,183 @@
     range.addEventListener('change', () => store.set('glass', +range.value));
   }
 
+  /* ---------- my markers: your own pins, saved in this browser ----------
+     Drop one by pressing and holding the map (right-click with a mouse), or with "Add marker" and a
+     tap. Its card edits in place: name, note, colour and icon, saved as you type. While the card
+     is open the pin can be dragged to a new spot. */
+  const MARK_COLORS = ['#c4592a', '#b5332a', '#c9962a', '#3f8a3a', '#2e7774', '#3a6ea5', '#7a4fa0', '#5b3e29'];
+  const MARK_GLYPHS = ['star', 'flag', 'heart', 'tent', 'house', 'chest', 'gem', 'skull', 'paw', 'fish', 'flower', 'question'];
+  const markName = (m) => m.name.trim() || 'Marked spot';
+  function cellOf(m) {
+    const g = S.data.map;
+    const row = g.rowLabels[Math.min(g.rows - 1, Math.max(0, Math.floor(m.y / g.cellH)))];
+    return row + (Math.min(g.cols - 1, Math.max(0, Math.floor(m.x / g.cellW))) + 1);
+  }
+  const cellLabel = (m) => { const c = cellOf(m), pg = S.data.map.atlasPages?.[c]; return `Grid ${c}${pg ? ` · atlas p. ${pg}` : ''}`; };
+
+  // A marker from storage or an imported file: keep only what's understood, inside the map.
+  function cleanMark(m) {
+    const num = (v, max) => Math.max(0, Math.min(max, +v || 0));
+    return {
+      id: String(m.id).slice(0, 40), x: num(m.x, S.W || 2240), y: num(m.y, S.H || 1680),
+      name: typeof m.name === 'string' ? m.name.slice(0, 60) : '', note: typeof m.note === 'string' ? m.note.slice(0, 500) : '',
+      color: MARK_COLORS.includes(m.color) ? m.color : MARK_COLORS[0], glyph: MARK_GLYPHS.includes(m.glyph) ? m.glyph : 'star',
+    };
+  }
+  const loadMarks = () => {
+    const v = store.get('marks', []);
+    return Array.isArray(v) ? v.filter((m) => m && typeof m.id === 'string' && Number.isFinite(+m.x) && Number.isFinite(+m.y)).map(cleanMark) : [];
+  };
+  const saveMarks = () => { store.set('marks', S.marks); keepStorage(); };
+
+  function initMarks() {
+    S.marks = loadMarks();
+    S.markOf = new Map();
+    S.markLayer = L.layerGroup();
+    for (const m of S.marks) drawMark(m);
+    setMarksShown(store.get('marksShown', true), false);
+    $('#mmShow').addEventListener('click', () => setMarksShown(!S.map.hasLayer(S.markLayer)));
+    $('#mmAdd').addEventListener('click', () => setPlacing(true));
+    $('#placeCancel').addEventListener('click', () => setPlacing(false));
+    $('#mmList').addEventListener('click', (e) => { const b = e.target.closest('[data-mark]'); if (b) showMark(b.dataset.mark); });
+    window.addEventListener('storage', (e) => {
+      if (e.key !== 'campfire:marks') return;
+      S.marks = loadMarks(); S.markLayer.clearLayers(); S.markOf.clear(); S.marks.forEach(drawMark); renderMarks();
+    });
+    renderMarks();
+  }
+
+  function setMarksShown(on, save = true) {
+    on ? S.markLayer.addTo(S.map) : S.markLayer.remove();
+    const b = $('#mmShow');
+    b.setAttribute('aria-pressed', String(on));
+    b.setAttribute('aria-label', on ? 'Hide my markers on the map' : 'Show my markers on the map');
+    if (save) store.set('marksShown', on);
+  }
+
+  const markIcon = (m) => L.divIcon({ className: 'mk mk-mine', iconSize: [28, 36], iconAnchor: [14, 35], html: pinHtml(m.color, m.glyph) });
+
+  function drawMark(m) {
+    let mk = S.markOf.get(m.id);
+    if (!mk) {
+      mk = L.marker(ll(m), { icon: markIcon(m), title: markName(m), zIndexOffset: 400, riseOnHover: true });
+      mk.on('click', (e) => { L.DomEvent.stop(e); openMark(m.id, { nudge: true }); });
+      mk.on('contextmenu', (e) => { L.DomEvent.stop(e); e.originalEvent?.preventDefault(); openMark(m.id, { nudge: true }); });
+      mk.on('dragstart', () => mk._icon?.classList.add('is-lifted'));
+      mk.on('dragend', () => {
+        mk._icon?.classList.remove('is-lifted');
+        const at = mk.getLatLng();
+        m.x = Math.max(0, Math.min(S.W, at.lng)); m.y = Math.max(0, Math.min(S.H, -at.lat));
+        mk.setLatLng(ll(m)); saveMarks(); renderMarks();
+        if (S.selectedMark === m.id) { const c = $('#placeCard .mk-cell'); if (c) c.textContent = cellLabel(m); }
+      });
+      S.markOf.set(m.id, mk); mk.addTo(S.markLayer);
+    } else { mk.setIcon(markIcon(m)); mk.setLatLng(ll(m)); mk.options.title = markName(m); }
+    if (S.selectedMark === m.id) mk._icon?.classList.add('is-sel');      // a new icon element loses its classes
+    return mk;
+  }
+
+  function addMarkAt(latlng, focus) {
+    const last = store.get('markStyle', {});
+    const m = cleanMark({ id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), x: latlng.lng, y: -latlng.lat, color: last.color, glyph: last.glyph });
+    S.marks.push(m); saveMarks();
+    if (!S.map.hasLayer(S.markLayer)) setMarksShown(true);
+    drawMark(m);
+    replay(S.markOf.get(m.id)._icon, 'is-drop');                         // it drops in with a little bounce
+    renderMarks();
+    openMark(m.id, { nudge: true, focus });
+  }
+
+  function deselectMark() {
+    const id = S.selectedMark; if (!id) return;
+    S.selectedMark = null;
+    const mk = S.markOf?.get(id);
+    mk?.dragging?.disable(); mk?._icon?.classList.remove('is-sel');
+  }
+
+  function openMark(id, opts = {}) {
+    const m = S.marks.find((x) => x.id === id); if (!m) return;
+    selectMarker(null); deselectMark();
+    S.selectedMark = id;
+    const mk = S.markOf.get(id);
+    mk._icon?.classList.add('is-sel'); mk.dragging?.enable();
+    const card = $('#placeCard');
+    card.innerHTML = `<div class="grab"></div>
+      <button class="pc-close" type="button" aria-label="Close">${ICONS.close}</button>
+      <span class="pc-type" style="--c:${m.color}"><span class="dot"></span>My marker</span>
+      <input class="mk-name" type="text" maxlength="60" placeholder="Name this marker" value="${esc(m.name)}" aria-label="Marker name" enterkeyhint="done" autocomplete="off">
+      <textarea class="mk-note" rows="2" maxlength="500" placeholder="Add a note (optional)" aria-label="Note">${esc(m.note)}</textarea>
+      <div class="mk-pick" role="radiogroup" aria-label="Colour">${MARK_COLORS.map((c, i) => `<button type="button" class="mk-color" role="radio" data-color="${c}" style="--c:${c}" aria-checked="${c === m.color}" aria-label="Colour ${i + 1}"></button>`).join('')}</div>
+      <div class="mk-pick mk-glyphs" role="radiogroup" aria-label="Icon" style="--c:${m.color}">${MARK_GLYPHS.map((g) => `<button type="button" class="mk-glyph" role="radio" data-glyph="${g}" aria-checked="${g === m.glyph}" aria-label="${g}">${glyph(g)}</button>`).join('')}</div>
+      <div class="pc-src mk-src"><span class="mono mk-cell">${cellLabel(m)}</span><span class="mono">Drag the pin to move it</span></div>
+      <div class="mk-actions"><button type="button" class="mk-done">Done</button><button type="button" class="mk-del">Delete</button></div>`;
+    showSoftly(card); card.scrollTop = 0;
+    const name = $('.mk-name', card), note = $('.mk-note', card);
+    let saveT;
+    const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { saveMarks(); renderMarks(); }, 250); };   // saved as you type
+    name.oninput = () => { m.name = name.value; mk.options.title = markName(m); save(); };
+    note.oninput = () => { m.note = note.value; save(); };
+    name.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); name.blur(); } };
+    const restyle = () => {
+      $$('[data-color]', card).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.color === m.color)));
+      $$('[data-glyph]', card).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.glyph === m.glyph)));
+      $('.pc-type', card).style.setProperty('--c', m.color); $('.mk-glyphs', card).style.setProperty('--c', m.color);
+      store.set('markStyle', { color: m.color, glyph: m.glyph });       // the next marker starts in the same style
+      drawMark(m); replay(mk._icon, 'is-restyle'); saveMarks(); renderMarks();
+    };
+    card.onclick = (e) => {
+      if (e.target.closest('.pc-close, .mk-done')) { closePlace(); return; }
+      const c = e.target.closest('[data-color]'); if (c) { m.color = c.dataset.color; restyle(); return; }
+      const g = e.target.closest('[data-glyph]'); if (g) { m.glyph = g.dataset.glyph; restyle(); return; }
+      const del = e.target.closest('.mk-del');
+      if (del) {                                                       // two taps, so a slip doesn't lose it
+        if (del.classList.contains('is-confirm')) { removeMark(m.id); return; }
+        del.classList.add('is-confirm'); del.textContent = 'Tap again to delete';
+        setTimeout(() => { if (del.isConnected) { del.classList.remove('is-confirm'); del.textContent = 'Delete'; } }, 3000);
+      }
+    };
+    if (opts.nudge) {                                                  // slide the map only if the card or a pane covers the pin
+      const pin = mk._icon?.getBoundingClientRect(), cr = card.getBoundingClientRect();
+      const under = pin && !(pin.right < cr.left || pin.left > cr.right || pin.bottom < cr.top || pin.top > cr.bottom);
+      const offPane = pin && desktop.matches && (pin.left < sideCover() || pin.right > S.map.getSize().x - todoCover());
+      if (under || offPane) centerBesideCard(m, S.map.getZoom(), true);
+    }
+    if (opts.focus) name.focus({ preventScroll: true });
+  }
+
+  function removeMark(id) {
+    const mk = S.markOf.get(id);
+    closePlace();
+    S.marks = S.marks.filter((m) => m.id !== id); saveMarks(); renderMarks();
+    S.markOf.delete(id);
+    if (mk) { mk._icon?.classList.add('is-gone'); setTimeout(() => S.markLayer.removeLayer(mk), reduceMotion() ? 0 : 260); }
+  }
+
+  // From the list or search: show the layer if it's hidden, glide there and open the card.
+  function showMark(id) {
+    const m = S.marks.find((x) => x.id === id); if (!m) return;
+    if (!S.map.hasLayer(S.markLayer)) setMarksShown(true);
+    if (!desktop.matches) { setDrawer(false); setView('map'); }
+    requestAnimationFrame(() => { ensureView(); openMark(id); centerBesideCard(m, Math.max(S.map.getZoom(), -0.5), true); });
+  }
+
+  // "Add marker": the next tap on the map drops it there.
+  function setPlacing(on) {
+    S.placing = on;
+    S.map.getContainer().classList.toggle('is-placing', on);
+    on ? showSoftly($('#placeHint')) : hideSoftly($('#placeHint'));
+    if (on) { closePlace(); if (!desktop.matches) { setDrawer(false); setView('map'); } }
+  }
+
+  function renderMarks() {
+    $('#mmList').innerHTML = S.marks.slice().reverse().map((m) => `<li><button type="button" class="mm-item" data-mark="${esc(m.id)}">
+        <span class="mm-pin">${pinHtml(m.color, m.glyph)}</span>
+        <span class="mm-text"><b>${esc(markName(m))}</b><small>${esc(cellOf(m))}${m.note.trim() ? ' · ' + esc(m.note.trim().slice(0, 80)) : ''}</small></span>
+      </button></li>`).join('');
+    $('#mmEmpty').hidden = S.marks.length > 0;
+    $('#mmCount').textContent = S.marks.length ? String(S.marks.length) : '';
+  }
+
   /* ---------- to-do list (right side of the map) ----------
      Type what you need ("2 perfect deer pelt"); matching suggestions pop up as you type, and the
      pick becomes an item with one tick box per piece. Saved in this browser (campfire:todo). */
@@ -1895,7 +2148,7 @@
     const sorted = [...spots].sort((a, b) => (rank[a.conf] ?? 3) - (rank[b.conf] ?? 3));
     const name = S.topics.get(topic)?.title || topic;
     const conf = { many: 'many players confirm', some: 'a few confirm', guide: 'from guides' };
-    pick.hidden = false;
+    pick.hidden = false; replay(pick, 'is-fresh');
     pick.innerHTML = `<div class="hf-pick-head"><b>${esc(name)}</b><span class="mono">${spots.length} spot${spots.length === 1 ? '' : 's'}</span>
         <button type="button" class="textbtn" data-hf-clear>All animals</button></div>
       <ul class="hf-list">${sorted.map((p) => `<li><button type="button" class="hf-spot" data-spot="${esc(p.id)}">
@@ -1938,6 +2191,7 @@
 
   function openPlace(id) {
     const p = S.places.get(id); if (!p) return;
+    deselectMark();
     const t = TYPES[p.type] || TYPES.landmark;
     selectMarker(id);
     const related = (p.topics || []).map((tid) => S.topics.get(tid)).filter(Boolean);
@@ -1985,6 +2239,7 @@
     const card = $('#placeCard');
     if (!isShown(card)) return;
     hideSoftly(card);
+    deselectMark();
     selectMarker(null);
     if (location.hash.startsWith('#place=')) history.replaceState(null, '', location.pathname + location.search);
   }

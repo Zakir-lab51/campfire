@@ -920,18 +920,189 @@ button, a, .chip, .cat, .mk, .hd-check { -webkit-tap-highlight-color: transparen
 
 /* segmented control: the pill glides and settles */
 .seg::before { transition: transform .52s var(--spring); }
-.seg button { transition: color .3s var(--ease); }
+.seg button { transition: color .3s var(--smooth), transform var(--snappy-d) var(--snappy); }
 
 /* to-do items: a new one slides in, a removed one folds away, a tick pops */
 .td-item.is-new { animation: itemIn .45s var(--ease); }
 @keyframes itemIn { from { opacity: 0; transform: translateY(-10px) scale(.97); } }
 .td-item.is-leaving { animation: itemOut .24s var(--ease-in) forwards; pointer-events: none; }
 @keyframes itemOut { to { opacity: 0; transform: translateX(24px) scale(.96); } }
-.td-box.is-pop { animation: pop .4s var(--spring); }
-@keyframes pop { 0% { transform: scale(.7); } 100% { transform: scale(1); } }
 .td-box, .hd-check { transition: background .25s var(--ease), border-color .25s var(--ease), transform .2s var(--spring); }
 
-/* a soft press on everything you tap */
-:is(.search-btn, .seg button, .td-box, .td-need button, .td-step, .hd-check, .panel-toggle, .todo-toggle, .map-fab, .pc-found, .hf-spot, .pc-link, .actbtn):active { transform: scale(.95); }
-:is(.search-btn, .td-need button, .td-step, .map-fab, .pc-found, .hf-spot, .pc-link, .actbtn) { transition: transform .2s var(--spring), background .25s var(--ease), border-color .25s var(--ease), color .25s var(--ease); }
-.chip { transition: background .25s var(--ease), color .25s var(--ease), border-color .25s var(--ease), transform .2s var(--spring); }
+/* (presses: see "Feel" below) */
+
+/* ==========================================================================
+   Feel: Apple-style micro-interactions.
+   - Real spring curves (like SwiftUI's), sampled into CSS linear(): "smooth" never overshoots
+     (panes, cards), "snappy" settles with a whisper of bounce (pills, presses, pins), "bouncy"
+     is for small celebrations (ticks).
+   - A press squeezes a control quickly; letting go springs it back. List rows get the soft
+     highlight of an iOS list instead of shrinking.
+   - New content eases in where it appears; nothing re-animates on every keystroke.
+   ========================================================================== */
+:root {                                             /* browsers without linear(): close cubic-bezier stand-ins */
+  --smooth: cubic-bezier(.22, 1, .36, 1);  --smooth-d: .6s;
+  --snappy: cubic-bezier(.34, 1.25, .6, 1); --snappy-d: .48s;
+  --bouncy: cubic-bezier(.34, 1.56, .64, 1); --bouncy-d: .6s;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    /* smooth: response 0.5s, damping 1.0 -> settles in 0.71s, peak 1.000 */
+    --smooth-d: 0.71s;
+    --smooth: linear(0, 0.018, 0.063, 0.1247, 0.1952, 0.2693, 0.3434, 0.4149, 0.4822, 0.5446, 0.6015, 0.6528, 0.6987, 0.7395, 0.7755, 0.807, 0.8345, 0.8584, 0.8791, 0.897, 0.9124, 0.9256, 0.9369, 0.9466, 0.9548, 0.9618, 0.9678, 0.9729, 0.9772, 0.9808, 0.9838, 0.9864, 0.9886, 0.9905, 0.992, 0.9933, 0.9944, 0.9953, 0.9961, 0.9967, 0.9973, 0.9977, 0.9981, 0.9984, 1);
+    /* snappy: response 0.42s, damping 0.78 -> settles in 0.56s, peak 1.020 */
+    --snappy-d: 0.56s;
+    --snappy: linear(0, 0.0164, 0.0594, 0.1207, 0.1937, 0.2732, 0.355, 0.436, 0.5138, 0.5868, 0.6539, 0.7146, 0.7687, 0.8161, 0.857, 0.8919, 0.9213, 0.9455, 0.9652, 0.981, 0.9932, 1.0026, 1.0094, 1.0143, 1.0174, 1.0192, 1.0199, 1.0198, 1.0191, 1.018, 1.0166, 1.0151, 1.0134, 1.0118, 1.0102, 1.0088, 1.0074, 1.0061, 1.005, 1.004, 1.0031, 1.0024, 1.0018, 1.0013, 1);
+    /* bouncy: response 0.45s, damping 0.6 -> settles in 0.73s, peak 1.095 */
+    --bouncy-d: 0.73s;
+    --bouncy: linear(0, 0.0244, 0.0884, 0.1794, 0.2865, 0.401, 0.5156, 0.625, 0.7253, 0.8141, 0.89, 0.9526, 1.0023, 1.0397, 1.0663, 1.0833, 1.0923, 1.0948, 1.0923, 1.086, 1.0773, 1.0671, 1.0563, 1.0454, 1.0351, 1.0256, 1.0172, 1.0101, 1.0042, 0.9996, 0.9961, 0.9936, 0.9921, 0.9912, 0.991, 0.9913, 0.9919, 0.9927, 0.9937, 0.9947, 0.9957, 0.9967, 0.9976, 0.9984, 1);
+  }
+}
+* { -webkit-tap-highlight-color: transparent; }
+
+/* panes, cards, search and the tab pill ride the springs */
+@media (min-width: 960px), (min-width: 740px) and (min-height: 600px) {
+  .topbar, .sidebar { transition: transform var(--smooth-d) var(--smooth), opacity calc(var(--smooth-d) * .6) var(--smooth); }
+  .app.panel-collapsed :is(.topbar, .sidebar) { transition: transform var(--smooth-d) var(--smooth), opacity calc(var(--smooth-d) * .5) var(--ease-in), visibility 0s var(--smooth-d); }
+  .map-bottom { transition: left var(--smooth-d) var(--smooth); }
+  .leaflet-right, .placecard { transition: right var(--smooth-d) var(--smooth); }
+}
+.todo { animation-duration: var(--smooth-d); animation-timing-function: var(--smooth); }
+.todo.is-leaving { animation-duration: .34s; animation-timing-function: var(--ease-in); }
+:is(.placecard, .range-panel, .map-hits):not(.is-leaving) { animation: cardIn var(--smooth-d) var(--smooth); }
+.results:not(.is-leaving) { animation: dropIn .5s var(--smooth); }
+.search { transition: width var(--smooth-d) var(--smooth), background .35s var(--smooth), box-shadow .35s var(--smooth), border-color .35s var(--smooth); }
+.seg::before { transition: transform var(--snappy-d) var(--snappy); }
+.pin { transition: transform var(--snappy-d) var(--snappy); }                      /* the chosen pin lifts with a little spring */
+.pg-bar span, .hd-ch-bar span { transition: width .8s var(--smooth); }
+
+/* press: a quick squeeze, then a spring back on release */
+:is(button, .chip, [role="tab"]) {
+  transition: transform var(--snappy-d) var(--snappy), background-color .35s var(--smooth), color .3s var(--smooth),
+              border-color .3s var(--smooth), box-shadow .35s var(--smooth), opacity .3s var(--smooth);
+}
+:is(button, .chip, [role="tab"]):not(:disabled):active { transform: scale(.94); transition-duration: .09s; transition-timing-function: ease-out; }
+/* list rows and tiles: the soft highlight of an iOS list, barely any shrink */
+:is(.cat, .result, .td-opt, .hf-spot, .pc-link, .toc-list button, .sec-head, .topic-head):not(:disabled):active {
+  transform: scale(.985); background-color: rgba(60, 44, 30, .09);
+}
+.panel-toggle { transition: left var(--smooth-d) var(--smooth), transform var(--snappy-d) var(--snappy), background-color .35s var(--smooth); }
+.todo-toggle { transition: right var(--smooth-d) var(--smooth), transform var(--snappy-d) var(--snappy), background-color .35s var(--smooth); }
+.search-clear { transition: opacity .25s var(--smooth), transform var(--snappy-d) var(--snappy); }
+:is(.td-input, .hf-search):focus-within { box-shadow: 0 0 0 4px rgba(184, 70, 31, .12); }
+:is(.td-input, .hf-search) { transition: border-color .3s var(--smooth), box-shadow .35s var(--smooth), background-color .3s var(--smooth); }
+
+/* new content eases in where it appears */
+.sb-panel { animation: panelIn var(--smooth-d) var(--smooth); }                    /* switching Map / Guide / 100% */
+@keyframes panelIn { from { opacity: 0; transform: translateY(10px); } }
+.td-sugg { transform-origin: top center; animation: dropIn .45s var(--smooth); }   /* to-do suggestions popping up */
+.hf-pick.is-fresh { animation: cardIn var(--smooth-d) var(--smooth); }              /* a picked animal's spots */
+.result { animation: none; }                                                        /* results only cascade in when the list first opens */
+.results.is-fresh .result { animation: rise .5s var(--smooth) both; }
+.td-item.is-new { animation: itemIn var(--smooth-d) var(--snappy); }
+.topic-body, .sec-body { transition: grid-template-rows var(--smooth-d) var(--smooth); }
+.topic-body > div, .sec-body > div { transition: opacity .4s var(--smooth); }
+.topic:not([data-open="true"]) .topic-body > div, .sec:not([data-open="true"]) .sec-body > div { opacity: 0; }
+
+/* segmented controls: the pill can be dragged; while held it lifts and follows the finger exactly */
+.seg { touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+.seg.is-dragging::before {
+  transform: translateX(var(--x)) scale(1.05, 1.12);
+  transition: transform .08s linear;
+  box-shadow: 0 10px 22px -8px rgba(40, 24, 8, .45), inset 0 -1px 0 rgba(40, 24, 8, .06);
+}
+.seg.is-dragging button { color: var(--ink-dim); }
+.seg.is-dragging button.is-under { color: var(--ink); }
+.seg.is-dragging button:not(.is-under) svg { color: currentColor; }
+.seg.is-dragging button.is-under svg { color: var(--ember); }
+.seg.is-dragging button:active { transform: none; }
+
+/* ticks: a small, happy pop */
+.is-pop { animation: pop var(--bouncy-d) var(--bouncy); }
+@keyframes pop { from { transform: scale(.62); } to { transform: scale(1); } }
+.td-box, .hd-check, .pc-found .pf-box { transition: background-color .3s var(--smooth), border-color .3s var(--smooth), color .2s var(--smooth), transform var(--snappy-d) var(--snappy); }
+
+/* ---------- my markers ---------- */
+.my-marks {
+  margin: 10px 0 2px; padding: 12px 12px 10px; border-radius: var(--lg-r-tile);
+  background: var(--tile-bg); border: 1px solid var(--tile-edge); box-shadow: var(--tile-light);
+}
+.mm-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.mm-title { font: 800 13px var(--f-head); text-transform: uppercase; letter-spacing: .12em; }
+.mm-sub { font: 500 11.5px var(--f-mono); color: var(--ink-dim); }
+.mm-eye { margin-left: auto; width: 36px; height: 30px; padding: 0; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--cream-edge); background: var(--cream); color: var(--ember); }
+.mm-eye svg { width: 18px; height: 18px; stroke-width: 2; }
+.mm-eye[aria-pressed="false"] { color: var(--ink-faint); }
+.mm-eye[aria-pressed="false"] svg { opacity: .5; }
+.mm-add {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 40px; border-radius: 14px;
+  border: 1px dashed rgba(184, 70, 31, .45); background: rgba(255, 242, 220, .35); color: var(--ember); font: 700 13.5px var(--f-ui);
+}
+.mm-add svg { width: 17px; height: 17px; stroke-width: 2.4; }
+.mm-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.mm-list:empty { display: none; }
+.mm-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px 6px 8px; border-radius: 14px; text-align: left; color: var(--ink);
+  border: 1px solid var(--tile-edge); background: var(--tile-bg); box-shadow: var(--tile-light);
+}
+.mm-pin { flex: none; width: 24px; height: 30px; display: grid; place-items: center; }
+.mm-pin .pin { transform: scale(.8); transition: none; }
+.mm-text { min-width: 0; display: grid; }
+.mm-text b { font: 600 13.5px/1.25 var(--f-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-text small { font: 500 11px/1.35 var(--f-mono); color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-empty { margin: 8px 2px 0; font-size: 12px; line-height: 1.45; color: var(--ink-faint); }
+@media (hover: hover) { .mm-item:hover { border-color: rgba(184, 70, 31, .4); } }
+
+/* placing a marker: a crosshair and a hint at the top of the open map */
+.map.is-placing, .map.is-placing .leaflet-interactive { cursor: crosshair; }
+.place-hint {
+  position: absolute; z-index: 696; top: 14px; left: 10px; right: 10px; width: max-content; max-width: calc(100% - 20px); margin: 0 auto;
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px; border-radius: 999px;
+  font: 600 13.5px var(--f-ui); color: var(--ink);
+  background: var(--lg-sheen), var(--lg-card-tint); -webkit-backdrop-filter: var(--lg-card-blur); backdrop-filter: var(--lg-card-blur);
+  border: 1px solid var(--lg-edge); box-shadow: var(--lg-light), var(--lg-drop);
+  animation: cardIn var(--smooth-d) var(--smooth);
+}
+.place-hint svg { width: 18px; height: 18px; color: var(--ember); flex: none; }
+.place-hint.is-leaving { animation: cardOut var(--t-out) var(--ease-in) forwards; }
+@media (min-width: 960px), (min-width: 740px) and (min-height: 600px) {
+  .place-hint { left: calc(var(--side-w) + 10px); }
+  .app.panel-collapsed .place-hint { left: 10px; }
+  .app.todo-open .place-hint { right: calc(var(--todo-x) + 42px); }
+}
+
+/* your pins: they drop in, lift while dragged, shrink away when deleted */
+.mk-mine.is-drop .pin { animation: pinDrop var(--bouncy-d) var(--bouncy); }
+@keyframes pinDrop { from { translate: 0 -46px; opacity: 0; } 35% { opacity: 1; } }
+.mk-mine.is-restyle .pin { animation: pinPop var(--bouncy-d) var(--bouncy); }
+@keyframes pinPop { from { scale: .7; } }
+.mk-mine.is-lifted .pin { translate: 0 -8px; scale: 1.12; filter: drop-shadow(0 8px 6px rgba(40, 24, 8, .35)); transition: translate .2s var(--snappy), scale .2s var(--snappy); }
+.mk-mine.is-gone .pin { animation: pinGone .26s var(--ease-in) forwards; }
+@keyframes pinGone { to { scale: .3; opacity: 0; } }
+.mk-mine.is-sel { cursor: grab; }
+
+/* the marker's card: edits in place */
+.mk-name {
+  display: block; width: 100%; margin: 4px 0 6px; padding: 4px 8px; border: 1px solid transparent; border-radius: 12px;
+  background: rgba(255, 242, 220, .35); font: 800 22px/1.2 var(--f-head); color: var(--ink); outline: none;
+}
+.mk-note {
+  display: block; width: 100%; min-height: 56px; margin: 0 0 10px; padding: 8px; border: 1px solid transparent; border-radius: 12px;
+  background: rgba(255, 242, 220, .35); font: 400 16px/1.45 var(--f-ui); color: var(--ink); resize: vertical; outline: none;
+}
+.mk-name::placeholder, .mk-note::placeholder { color: var(--ink-faint); }
+:is(.mk-name, .mk-note) { transition: border-color .3s var(--smooth), background-color .3s var(--smooth), box-shadow .35s var(--smooth); }
+:is(.mk-name, .mk-note):focus { border-color: var(--cream-edge); background: rgba(255, 246, 230, .72); box-shadow: 0 0 0 4px rgba(184, 70, 31, .12); }
+.mk-pick { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 10px; }
+.mk-color { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 246, 230, .95); background: var(--c); box-shadow: 0 2px 6px -2px rgba(40, 24, 8, .45); }
+.mk-color[aria-checked="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
+.mk-glyph { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--cream-edge); background: var(--cream); color: var(--ink-dim); }
+.mk-glyph svg { width: 18px; height: 18px; stroke-width: 2; }
+.mk-glyph svg .f { fill: currentColor; stroke: none; }
+.mk-glyph[aria-checked="true"] { background: var(--c, var(--ember)); border-color: transparent; color: #fff8ec; }
+.mk-actions { display: flex; gap: 8px; margin-top: 12px; }
+.mk-actions button { flex: 1; height: 42px; border-radius: 14px; font: 700 14px var(--f-ui); }
+.mk-done { border: 0; background: var(--ink); color: var(--paper-3); }
+.mk-del { border: 1px solid rgba(181, 51, 42, .35); background: rgba(255, 242, 220, .35); color: #b5332a; }
+.mk-del.is-confirm { background: #b5332a; border-color: #b5332a; color: #fff8ec; }
+.mk-src { justify-content: space-between; gap: 4px 12px; }
