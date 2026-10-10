@@ -9,9 +9,42 @@
     get(k, d) { try { const v = localStorage.getItem('campfire:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('campfire:' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
   };
+  // How see-through the glass panes are: 0 = nearly solid, 100 = clear (70 is the standard look).
+  // Sets the pane tint, the frost (blur) and the tiles' cream together; remembered in this browser.
+  function applyGlass(v) {
+    const t = Math.max(0, Math.min(100, +v || 0)) / 100, hi = t >= 0.7;
+    const tint = hi ? 0.06 * (1 - t) / 0.3 : 0.06 + 0.86 * (0.7 - t) / 0.7;
+    const blur = hi ? 3 + 10 * (1 - t) / 0.3 : 13 + 13 * (0.7 - t) / 0.7;
+    const tile = hi ? 0.14 + 0.18 * (1 - t) / 0.3 : 0.32 + 0.4 * (0.7 - t) / 0.7;
+    const r = document.documentElement.style;
+    r.setProperty('--lg-tint', `rgba(255, 251, 243, ${tint.toFixed(3)})`);
+    r.setProperty('--lg-blur', `blur(${blur.toFixed(1)}px) saturate(1.25) brightness(1.06)`);
+    r.setProperty('--tile-bg', `linear-gradient(160deg, rgba(255, 240, 214, ${tile.toFixed(3)}), rgba(246, 226, 192, ${(tile / 4).toFixed(3)}))`);
+    // cards over the map wear the same glass, just a little frostier so their text stays easy to read
+    r.setProperty('--lg-card-tint', `rgba(255, 251, 243, ${Math.min(0.95, tint + 0.1).toFixed(3)})`);
+    r.setProperty('--lg-card-blur', `blur(${Math.max(8, blur + 4).toFixed(1)}px) saturate(1.25) brightness(1.06)`);
+  }
+  // Starts solid on devices set to "Reduce transparency".
+  const GLASS_DEFAULT = window.matchMedia?.('(prefers-reduced-transparency: reduce)').matches ? 0 : 70;
+  applyGlass(store.get('glass', GLASS_DEFAULT));     // before anything is drawn, so there's no flash
+
   // Side panel + map together on wide screens and on any iPad (portrait too); one view at a time on phones.
   const desktop = window.matchMedia('(min-width: 960px), (min-width: 740px) and (min-height: 600px)');
   const touch = navigator.maxTouchPoints > 0;
+  const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Cards and panels arrive with a CSS animation when shown. Hiding plays a short "leaving"
+  // animation first; showing again midway cancels it.
+  function showSoftly(el) {
+    clearTimeout(el._leaveT); el.classList.remove('is-leaving'); el.hidden = false;
+  }
+  function hideSoftly(el, ms = 240) {
+    if (el.hidden || el.classList.contains('is-leaving')) return;
+    if (reduceMotion()) { el.hidden = true; return; }
+    el.classList.add('is-leaving');
+    el._leaveT = setTimeout(() => { el.hidden = true; el.classList.remove('is-leaving'); }, ms);
+  }
+  const isShown = (el) => !el.hidden && !el.classList.contains('is-leaving');
   // iPadOS Safari reports itself as a Mac, so check for touch too.
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
@@ -132,9 +165,8 @@
     for (const sec of data.sections) for (const t of sec.topics) { S.topics.set(t.id, t); S.sectionOf.set(t.id, sec); }
     for (const p of data.places) S.places.set(p.id, p);
 
-    observeHeader();
     renderIntro();
-    renderQuick();
+    observeHeader();
     renderToc();
     renderCats();
     renderSections();
@@ -163,15 +195,6 @@
     ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v.toLocaleString()}</dd></div>`).join('');
     $('#disclaimer').textContent = d.meta.disclaimer;
     $('#sourceLine').textContent = `Source: ${d.meta.source} · data v${d.meta.version}, updated ${d.meta.updated}`;
-  }
-
-  function renderQuick() {
-    const box = $('#quick');
-    box.innerHTML = S.data.quickSearch.map((q) => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('');
-    box.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-q]'); if (!b) return;
-      const input = $('#q'); input.value = b.dataset.q; input.focus(); runSearch();
-    });
   }
 
   function renderToc() {
@@ -344,18 +367,39 @@
   }
 
   let debounceT;
+  // The search is a round button that grows into the field. It folds back when closed with ×,
+  // with Escape, or when it's left empty; a search in progress keeps it open.
+  function setSearchOpen(open) {
+    const box = $('.search'), input = $('#q');
+    box.classList.toggle('is-open', open);
+    $('#searchBtn').setAttribute('aria-expanded', String(open));
+    input.tabIndex = open ? 0 : -1; $('#clear').tabIndex = open ? 0 : -1;
+    if (open) input.focus();                       // in the tap itself, so iPad and iPhone show the keyboard
+    else { showResults(false); input.blur(); }
+  }
+
   function bindSearch() {
     const input = $('#q');
-    input.addEventListener('input', () => { clearTimeout(debounceT); debounceT = setTimeout(runSearch, 110); $('#clear').hidden = !input.value; });
-    input.addEventListener('focus', () => { if (input.value.trim().length >= 2) showResults(true); });
+    const isOpen = () => $('.search').classList.contains('is-open');
+    input.addEventListener('input', () => { clearTimeout(debounceT); debounceT = setTimeout(runSearch, 110); });
+    input.addEventListener('focus', () => { if (!isOpen()) setSearchOpen(true); if (input.value.trim().length >= 2) showResults(true); });
+    input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input && !input.value.trim()) setSearchOpen(false); }, 160));
     input.addEventListener('keydown', onSearchKey);
-    $('#clear').addEventListener('click', () => { input.value = ''; $('#clear').hidden = true; runSearch(); input.focus(); });
+    $('#searchBtn').addEventListener('click', () => { if (!isOpen()) setSearchOpen(true); else input.focus(); });
+    $('#clear').addEventListener('click', () => { input.value = ''; runSearch(); setSearchOpen(false); });
     document.addEventListener('keydown', (e) => {
-      if (e.key === '/' && document.activeElement !== input && !/input|textarea/i.test(document.activeElement.tagName)) { e.preventDefault(); input.focus(); input.select(); }
-      if (e.key === 'Escape') { if (!$('#results').hidden) showResults(false); else if ($('#layout').classList.contains('drawer-open')) setDrawer(false); else closePlace(); }
+      if (e.key === '/' && document.activeElement !== input && !/input|textarea/i.test(document.activeElement.tagName)) { e.preventDefault(); setSearchOpen(true); input.select(); }
+      if (e.key === 'Escape') {
+        if (isShown($('#results'))) showResults(false);
+        else if (isOpen()) setSearchOpen(false);
+        else if ($('#layout').classList.contains('drawer-open')) setDrawer(false); else closePlace();
+      }
     });
     document.addEventListener('pointerdown', (e) => {
-      if (!e.target.closest('#results') && !e.target.closest('.search')) showResults(false);
+      if (!e.target.closest('#results') && !e.target.closest('.search')) {
+        showResults(false);
+        if (isOpen() && !input.value.trim()) setSearchOpen(false);
+      }
     });
     $('#results').addEventListener('click', (e) => {
       const fit = e.target.closest('[data-fit]'); if (fit) { showResults(false); fitHits(); return; }
@@ -388,7 +432,7 @@
     const plants = S.ranges && tokens.length ? S.data.ranges.species.filter((sp) => sp.kind === 'plant'
       && tokens.every((t) => wordRanges(sp.name, [t]).length)).slice(0, 3) : [];
     if (!topics.length && !places.length && !plants.length) {   // (hunting spots are places too)
-      box.innerHTML = `<div class="results-empty">No matches for “${esc(q)}”. Try fewer words, or one of the quick searches.</div>`;
+      box.innerHTML = `<div class="results-empty">No matches for “${esc(q)}”. Try fewer or shorter words.</div>`;
       return;
     }
     const hunts = places.filter((r) => S.places.get(r.item.id)?.type === 'hunt');
@@ -516,8 +560,9 @@
 
   function showResults(on) {
     const box = $('#results');
-    box.hidden = !on || !box.innerHTML;
-    $('#q').setAttribute('aria-expanded', String(!box.hidden));
+    const show = on && !!box.innerHTML;
+    show ? showSoftly(box) : hideSoftly(box, 170);
+    $('#q').setAttribute('aria-expanded', String(show));
   }
 
   function onSearchKey(e) {
@@ -535,8 +580,7 @@
   }
 
   function activateResult(el) {
-    showResults(false);
-    $('#q').blur();
+    setSearchOpen(false);                            // folds the field back; the words stay for next time
     if (el.dataset.kind === 't') openTopic(el.dataset.id, true);
     else if (el.dataset.kind === 'r') { setHits([]); showRange(el.dataset.id, { fit: true }); }   // the range dots, not search rings
     else showPlace(el.dataset.id, true);
@@ -551,7 +595,7 @@
     $('#scrim').addEventListener('click', () => setDrawer(false));
     $('#panelToggle').addEventListener('click', () => setPanelOpen($('#layout').classList.contains('panel-collapsed'), true));
     if (store.get('panel', 'open') === 'collapsed') setPanelOpen(false, false);
-    desktop.addEventListener?.('change', () => { setDrawer(false); S.map && setTimeout(() => { S.map.invalidateSize(); setMapBounds(); }, 50); });
+    desktop.addEventListener?.('change', () => { setDrawer(false); S.map && setTimeout(() => S.map.invalidateSize(), 50); });
     S.mapShown = true;
   }
 
@@ -560,6 +604,7 @@
     S.view = v;
     $('#layout').dataset.view = v;
     $$('.viewtabs [data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+    slideSeg($('.viewtabs'), $$('.viewtabs [data-view]').findIndex((b) => b.dataset.view === v));
     setDrawer(false);
     setPanel(v === 'map' ? 'map' : v);
     if (v !== 'map') window.scrollTo(0, 0);
@@ -573,8 +618,12 @@
   function setPanel(panel) {
     $('#sidebar').dataset.panel = panel;
     $$('.sb-tabs [data-panel]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.panel === panel)));
+    slideSeg($('.sb-tabs'), $$('.sb-tabs [data-panel]').findIndex((b) => b.dataset.panel === panel));
     if (panel === 'hundred') loadHundred();
   }
+
+  // Move a segmented control's bright pill to the chosen tab.
+  function slideSeg(seg, i) { if (seg && i >= 0) seg.style.setProperty('--i', i); }
 
   // Wide screens: fold the side panel away for a full-screen map (remembered per browser).
   function setPanelOpen(open, save) {
@@ -584,12 +633,8 @@
     const label = open ? 'Hide the side panel' : 'Show the side panel';
     btn.setAttribute('aria-expanded', String(open)); btn.setAttribute('aria-label', label); btn.title = label;
     if (save) store.set('panel', open ? 'open' : 'collapsed');
-    // The map runs under the glass panel, so it keeps its size: slide the view half the panel's
-    // width instead, keeping the same spot in the middle of the open area.
-    if (!S.map || !desktop.matches) return;
-    const half = sideWidth() / 2;
-    if (open) { setMapBounds(); S.map.panBy([-half, 0]); }
-    else { S.map.once('moveend', setMapBounds); S.map.panBy([half, 0]); }    // tighten once the slide ends
+    // The map runs under the glass panel and keeps its size and place: nothing on it moves.
+    updateRoom();
   }
 
   function setDrawer(open) {
@@ -630,14 +675,12 @@
     } else {
       L.imageOverlay(m.image, bounds, { className: 'base-map', pane: 'base' }).addTo(map);
     }
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
     S.homeBounds = bounds;
     setTodoOpen(store.get('todoOpen', false), false);   // before the first view, which leaves room for it
     homeView();
     // The container may get its final size after fonts/header settle; refit once it has.
     requestAnimationFrame(() => { map.invalidateSize(); homeView(); });
     map.on('zoomend', zoomClass); zoomClass();
-    map.on('zoomend', setMapBounds);
     map.on('resize', fitMinZoom);
     map.on('click', () => closePlace());
 
@@ -668,13 +711,6 @@
   const sideWidth = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--side-w')) || 0;
   const sideCover = () => (desktop.matches && !$('#layout').classList.contains('panel-collapsed') ? sideWidth() : 0);
 
-  // Panning may go past the map's edges by what the panes cover, so no corner of the map is
-  // stuck underneath one. Bounds are in map units, so they're re-worked out at each zoom.
-  function setMapBounds() {
-    if (!S.map?._loaded) return;                     // no view yet
-    const s = 2 ** S.map.getZoom();
-    S.map.setMaxBounds(L.latLngBounds([[-S.H, -sideCover() / s], [0, S.W + todoCover() / s]]));
-  }
 
   // After the map settles, quietly fetch the tiles for the next zoom level in (and the one out)
   // over the current view, so the next zoom shows sharp tiles straight away. Skipped when the
@@ -728,11 +764,9 @@
     fitMinZoom();
     const size = S.map.getSize(), min = S.map.getMinZoom();
     if (size.x >= 700) {
-      setMapBounds();
-      const z = S.map.getBoundsZoom(S.homeBounds, true, L.point(sideCover() + todoCover(), 0));   // fill the open area
-      const mid = S.map.project([-S.H / 2, S.W / 2], z).add([(todoCover() - sideCover()) / 2, 0]);
-      S.map.setView(S.map.unproject(mid, z), z, { animate: false });
-      setMapBounds();
+      // the whole map, shifted towards the open area as far as its edges allow (they never leave the screen)
+      const mid = S.map.project([-S.H / 2, S.W / 2], min).add([(todoCover() - sideCover()) / 2, 0]);
+      S.map.setView(S.map.unproject(mid, min), min, { animate: false });
       return;
     }
     const z = Math.max(min, Math.min(0, Math.log2(Math.min(size.x / 1150, size.y / 900))));
@@ -819,6 +853,7 @@
     });
     initHuntFinder();
     initTodo();
+    initGlass();
     $('#showAll').addEventListener('click', () => { $$('#catList [data-layer]').forEach((b) => setLayer(b, true)); save(); });
     $('#hideAll').addEventListener('click', () => { $$('#catList [data-layer]').forEach((b) => setLayer(b, false)); save(); });
     initProgress();
@@ -843,7 +878,7 @@
     refreshMarker(p);
     renderProgress();
     syncHundred();
-    if (S.selected === id && !$('#placeCard').hidden) renderFoundBtn(p);
+    if (S.selected === id && isShown($('#placeCard'))) renderFoundBtn(p);
   }
 
   // Swap the pin's icon for the found / not-found one, and hide it when "Hide found" is on.
@@ -928,7 +963,7 @@
       const was = [...S.found]; S.found.clear(); saveFound();
       was.forEach((id) => { const p = S.places.get(id); if (trackable(p)) refreshMarker(p); });
       renderProgress(); syncHundred();
-      if (S.selected && !$('#placeCard').hidden) renderFoundBtn(S.places.get(S.selected));
+      if (S.selected && isShown($('#placeCard'))) renderFoundBtn(S.places.get(S.selected));
     });
     // Another tab marked something: pick it up.
     window.addEventListener('storage', (e) => {
@@ -1374,7 +1409,7 @@
     if (S.panelKind !== kind) renderRangePanel(kind);
     if (!desktop.matches) setView('map');
     if (!S.rangeGrid) {                                  // first range: fetch the detailed file
-      $('#rangePanel').hidden = false; $('#rangeSel').value = key;
+      showSoftly($('#rangePanel')); $('#rangeSel').value = key;
       $('.rp-legend').hidden = true; $('#rpNote').textContent = 'Loading the range…';
       loadRanges().then(() => { if (S.range === key) showRange(key, opts); })
         .catch(() => { $('#rpNote').textContent = "Couldn't load the ranges. Check your connection and try again."; S.rangeFull = null; });
@@ -1384,7 +1419,7 @@
     const res = rangeDots(key);
     drawRange(key, res, multi);
 
-    $('#rangePanel').hidden = false;
+    showSoftly($('#rangePanel'));
     $('#catList [data-ranges]')?.setAttribute('aria-pressed', String(kind === 'animal'));
     $('#catList [data-plants]')?.setAttribute('aria-pressed', String(kind === 'plant'));
     $('#rangeSel').value = key;
@@ -1423,14 +1458,14 @@
       const bottom = desktop.matches ? 24 : $('#mapBottom').offsetHeight + 24;
       // A range spanning nearly the whole map would shrink to a strip on a phone: start on the main landmass instead.
       if (!desktop.matches && S.map.getBoundsZoom(res.bounds, false, L.point(32, 70 + bottom)) < -1.5) { homeView(); return; }
-      S.map.fitBounds(res.bounds, { paddingTopLeft: [16 + sideCover(), 70], paddingBottomRight: [16 + todoCover(), bottom], maxZoom: -0.5 });
+      glideToBounds(res.bounds, { paddingTopLeft: [16 + sideCover(), 70], paddingBottomRight: [16 + todoCover(), bottom], maxZoom: -0.5 });
     });
   }
 
   function hideRange() {
     S.range = null;
     S.rangeLayer.clearLayers(); S.rangeLayer.remove();
-    $('#rangePanel').hidden = true;
+    hideSoftly($('#rangePanel'));
     $('#catList [data-ranges]')?.setAttribute('aria-pressed', 'false');
     $('#catList [data-plants]')?.setAttribute('aria-pressed', 'false');
     if (location.hash.startsWith('#range=')) history.replaceState(null, '', location.pathname + location.search);
@@ -1445,13 +1480,13 @@
     }
     const bar = $('#mapHits');
     if (list.length) {
-      bar.hidden = false;
+      showSoftly(bar);
       bar.innerHTML = `<span>${label ? esc(label) : `<b>${list.length}</b> matching place${list.length === 1 ? '' : 's'} glowing`}</span><button type="button" data-fit>Fit</button><button type="button" data-clear>Clear</button>`;
       bar.onclick = (e) => {
         if (e.target.closest('[data-fit]')) fitHits();
         if (e.target.closest('[data-clear]')) { setHits([]); if (S.huntFilter) pickHuntAnimal(null); }
       };
-    } else bar.hidden = true;
+    } else hideSoftly(bar);
   }
 
   function fitHits() {
@@ -1462,7 +1497,7 @@
       if (!S.hits?.length) return;                    // cleared before the frame came round
       ensureView();
       if (S.hits.length === 1) centerBesideCard(S.hits[0], 0, true);
-      else S.map.fitBounds(L.latLngBounds(S.hits.map(ll)).pad(0.25), { paddingTopLeft: [sideCover(), 0], paddingBottomRight: [todoCover(), 0], maxZoom: 0 });
+      else glideToBounds(L.latLngBounds(S.hits.map(ll)).pad(0.25), { paddingTopLeft: [sideCover(), 0], paddingBottomRight: [todoCover(), 0], maxZoom: 0 });
     });
   }
 
@@ -1478,20 +1513,47 @@
     });
   }
 
+  // Glide the map to a view: one smooth zoom-and-pan instead of a jump. The target is kept
+  // inside the map's edges first, so the glide never overshoots and bounces back.
+  function glideTo(center, zoom, instant) {
+    const m = S.map;
+    zoom = m._limitZoom(zoom ?? m.getZoom());
+    center = m._limitCenter(L.latLng(center), zoom, m.options.maxBounds);
+    if (instant || reduceMotion()) { m.setView(center, zoom, { animate: false }); return; }
+    const far = m.getCenter().distanceTo(center) * 2 ** zoom > m.getSize().x * 2 || Math.abs(m.getZoom() - zoom) > 1.5;
+    m.flyTo(center, zoom, { duration: far ? 0.9 : 0.6, easeLinearity: 0.3 });
+  }
+  function glideToBounds(bounds, opts) {
+    const { center, zoom } = S.map._getBoundsCenterZoom(L.latLngBounds(bounds), opts);
+    glideTo(center, zoom);
+  }
+
   // Centre the map so the marker isn't hidden under the place card
   // (card sits on the right on desktop, as a bottom sheet on phones).
   function centerBesideCard(p, zoom, animate) {
     const card = $('#placeCard');
     const size = S.map.getSize();
     let right = todoCover(), dy = 0;
-    if (!card.hidden) {
-      const cw = card.offsetWidth + 14;                 // beside the to-do list when there's room, over it when not
-      if (desktop.matches) right = Math.min($('#layout').classList.contains('todo-room') ? cw + todoCover() : Math.max(cw, todoCover()), size.x * 0.6);
-      else dy = Math.min(card.offsetHeight + 8, size.y * 0.6) / 2;
+    if (isShown(card)) {
+      if (desktop.matches) {
+        // everything from the card's left edge to the right of the map is covered (card, tab, to-do list);
+        // if that leaves only a sliver of map, centre beside the to-do list instead and let the card overlap
+        const r = $('#mapView').clientWidth - card.offsetLeft + 14;
+        if (size.x - r - sideCover() >= 140) right = Math.max(r, right);
+      } else dy = Math.min(card.offsetHeight + 8, size.y * 0.6) / 2;
     }
-    const dx = (right - sideCover()) / 2;                // the open area's middle, between the side panel and the right-hand cover
-    const pt = S.map.project(ll(p), zoom).add([dx, dy]);
-    S.map.setView(S.map.unproject(pt, zoom), zoom, { animate });
+    const left = sideCover(), m = S.map, mb = m.options.maxBounds;
+    const off = L.point((right - left) / 2, dy);         // the open area's middle, between the side panel and the right-hand cover
+    // Near the map's edge the view can't slide far enough to bring the pin out from under a pane
+    // (it never shows blank space past the edge), so zoom in a little, a quarter step at a time, until it can.
+    const aim = (z) => {
+      const c = m._limitCenter(m.unproject(m.project(ll(p), z).add(off), z), z, mb);
+      const at = m.project(ll(p), z).subtract(m.project(c, z)).add(size.divideBy(2));
+      return { c, z, ok: at.x >= left + 24 && at.x <= size.x - right - 24 && at.y >= 24 && at.y <= size.y - dy * 2 - 24 };
+    };
+    let best = aim(zoom);
+    for (let z = zoom + 0.25; !best.ok && z <= Math.min(m.getMaxZoom(), 1.5); z += 0.25) { const t = aim(z); if (t.ok) best = t; }
+    glideTo(best.c, best.z, !animate);
   }
 
   // Hunting spots listed under each animal (topic id -> spots), for the range panel's "Best spots".
@@ -1514,13 +1576,22 @@
     fitHits();
   }
 
+  function initGlass() {
+    const range = $('#glassRange'), out = $('#glassVal');
+    const show = (v) => { out.textContent = `${v}%`; range.style.setProperty('--v', `${v}%`); };
+    range.value = store.get('glass', GLASS_DEFAULT); show(range.value);
+    range.addEventListener('input', () => { applyGlass(range.value); show(range.value); });
+    range.addEventListener('change', () => store.set('glass', +range.value));
+  }
+
   /* ---------- to-do list (right side of the map) ----------
      Type what you need ("2 perfect deer pelt"); matching suggestions pop up as you type, and the
      pick becomes an item with one tick box per piece. Saved in this browser (campfire:todo). */
   const NUM_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20, thirty: 30 };
   const SMALL_GAME = new Set(['animal-rabbit', 'animal-squirrel', 'animal-rat', 'animal-chipmunk', 'animal-opossum', 'animal-skunk', 'animal-bat',
     'animal-muskrat', 'animal-raccoon', 'animal-armadillo']);
-  S.todo = store.get('todo', []);
+  // A saved list that's missing or damaged starts empty rather than breaking the panel.
+  const loadTodo = () => { const v = store.get('todo', []); return Array.isArray(v) ? v.filter((t) => t && typeof t.id === 'string' && typeof t.text === 'string').map(cleanTodo) : []; };
   const saveTodo = () => store.set('todo', S.todo);
 
   // Everything the list can suggest: perfect pelts / carcasses / skins, legendary pelts, feathers,
@@ -1556,9 +1627,17 @@
       qty = /^\d+$/.test(lead[1]) ? parseInt(lead[1], 10) : NUM_WORDS[lead[1].toLowerCase()];
       rest = rest.slice(lead[0].length);
     } else if (trail) { qty = parseInt(trail[1] || trail[2], 10); rest = rest.slice(0, trail.index); }
-    const words = rest.toLowerCase().split(/[^a-z0-9']+/).filter((w) => w && !['of', 'the', 'need', 'i', 'get'].includes(w))
-      .map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
+    const words = rest.toLowerCase().split(/[^a-z0-9']+/).filter((w) => w && !['of', 'the', 'need', 'i', 'get'].includes(w)).map(singular);
     return { qty: Math.max(1, Math.min(qty || 1, 99)), words, rest: rest.trim() };
+  }
+
+  // berries -> berry, wolves -> wolf, geese -> goose, pelts -> pelt (moss and grass stay as they are)
+  const IRREGULAR = { geese: 'goose', wolves: 'wolf', mice: 'mouse', oxen: 'ox', calves: 'calf' };
+  function singular(w) {
+    if (IRREGULAR[w]) return IRREGULAR[w];
+    if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3) + 'y';
+    if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
+    return w;
   }
 
   function todoMatches(text) {
@@ -1580,6 +1659,7 @@
   }
 
   function initTodo() {
+    S.todo = loadTodo();
     const q = $('#tdQ'), sugg = $('#tdSugg');
     $('#todoToggle').addEventListener('click', () => setTodoOpen(!$('#layout').classList.contains('todo-open'), true));
     $('#tdClose').addEventListener('click', () => setTodoOpen(false, true));
@@ -1621,24 +1701,30 @@
       const li = e.target.closest('.td-item'); if (!li) return;
       const t = S.todo.find((x) => x.id === li.dataset.id); if (!t) return;
       const box = e.target.closest('[data-box]');
-      if (box) { const i = +box.dataset.box; t.got = t.got > i ? i : i + 1; return todoChanged(); }
+      if (box) {
+        const i = +box.dataset.box; t.got = t.got > i ? i : i + 1; todoChanged();
+        if (t.got > i) $(`.td-item[data-id="${CSS.escape(t.id)}"] [data-box="${i}"]`)?.classList.add('is-pop');   // a little pop on the tick
+        return;
+      }
       const step = e.target.closest('[data-step]');
       if (step) { t.got = Math.max(0, Math.min(t.qty, t.got + +step.dataset.step)); return todoChanged(); }
       const need = e.target.closest('[data-need]');                    // how many are needed; ticks never exceed it
       if (need) { t.qty = Math.max(1, Math.min(99, t.qty + +need.dataset.need)); t.got = Math.min(t.got, t.qty); return todoChanged(); }
-      if (e.target.closest('[data-del]')) { S.todo = S.todo.filter((x) => x !== t); return todoChanged(); }
+      if (e.target.closest('[data-del]')) {                            // fold the item away, then drop it
+        if (li.classList.contains('is-leaving')) return;
+        const drop = () => { S.todo = S.todo.filter((x) => x !== t); todoChanged(); };
+        if (reduceMotion()) return drop();
+        li.classList.add('is-leaving'); setTimeout(drop, 230); return;
+      }
       if (e.target.closest('[data-spots]')) { if (!desktop.matches) setTodoOpen(false, false); pickHuntAnimal(t.topic, { fit: true }); return; }
       if (e.target.closest('[data-range]')) { if (!desktop.matches) setTodoOpen(false, false); showRange(t.topic, { fit: true }); return; }
       if (e.target.closest('[data-place]')) { if (!desktop.matches) setTodoOpen(false, false); showPlace(t.place, true); return; }
       if (e.target.closest('[data-layer]')) { if (!desktop.matches) setTodoOpen(false, false); ensureLayer(t.layer); fitLayer(t.layer); }
     });
     $('#tdClearDone').addEventListener('click', () => { S.todo = S.todo.filter((t) => t.got < t.qty); todoChanged(); });
-    window.addEventListener('storage', (e) => { if (e.key === 'campfire:todo') { S.todo = store.get('todo', []); renderTodo(); } });
-    // room for the place card beside the list? (iPad landscape yes, portrait with the sidebar open no)
-    const mv = $('#mapView');
-    const roomy = () => $('#layout').classList.toggle('todo-room', desktop.matches && mv.clientWidth >= 720);
-    if (window.ResizeObserver) new ResizeObserver(roomy).observe(mv); else window.addEventListener('resize', roomy);
-    roomy();
+    window.addEventListener('storage', (e) => { if (e.key === 'campfire:todo') { S.todo = loadTodo(); renderTodo(); } });
+    if (window.ResizeObserver) new ResizeObserver(updateRoom).observe($('#mapView')); else window.addEventListener('resize', updateRoom);
+    updateRoom();
     renderTodo();
   }
 
@@ -1648,7 +1734,7 @@
     return {
       id: t.id.slice(0, 40), text: t.text.slice(0, 120), qty, got: Math.max(0, Math.min(qty, parseInt(t.got, 10) || 0)),
       kind: typeof t.kind === 'string' ? t.kind.slice(0, 20) : 'own',
-      topic: S.topics.has(t.topic) ? t.topic : undefined,
+      topic: S.topics.has(t.topic) || S.data.ranges?.species.some((sp) => sp.topic === t.topic) ? t.topic : undefined,   // animals and plants
       place: S.places.has(t.place) ? t.place : undefined,
       layer: ['orchid', 'gator-egg'].includes(t.layer) ? t.layer : undefined,
     };
@@ -1657,7 +1743,7 @@
   function addTodo(item, qty) {
     const same = S.todo.find((t) => t.text.toLowerCase() === item.text.toLowerCase() && t.got < t.qty);
     if (same) same.qty = Math.min(99, same.qty + qty);                // "2 deer pelts" again adds to the open item
-    else S.todo.unshift({ id: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), qty, got: 0, ...item });
+    else { S.todo.unshift({ id: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), qty, got: 0, ...item }); S.todoNew = S.todo[0].id; }
     todoChanged();
   }
 
@@ -1677,7 +1763,7 @@
       if (t.topic && S.ranges?.has(t.topic)) links.push(`<button type="button" data-range>${t.kind === 'herb' ? 'Where it grows' : 'Range'}</button>`);
       if (t.place) links.push('<button type="button" data-place>On the map</button>');
       if (t.layer) links.push(`<button type="button" data-layer>Show ${t.layer === 'orchid' ? 'orchids' : 'nests'}</button>`);
-      return `<li class="td-item${finished ? ' is-done' : ''}" data-id="${esc(t.id)}">
+      return `<li class="td-item${finished ? ' is-done' : ''}${t.id === S.todoNew ? ' is-new' : ''}" data-id="${esc(t.id)}">
         <div class="td-row"><span class="td-name">${esc(t.text)}</span>
           <span class="td-need" title="How many you need"><button type="button" data-need="-1" aria-label="Need one less"${t.qty <= 1 ? ' disabled' : ''}>−</button><b aria-label="Need ${t.qty}">×${t.qty}</b><button type="button" data-need="1" aria-label="Need one more"${t.qty >= 99 ? ' disabled' : ''}>+</button></span>
           <button type="button" class="td-del" data-del aria-label="Remove">${ICONS.close}</button></div>
@@ -1685,6 +1771,7 @@
         ${links.length && !finished ? `<div class="td-links">${links.join('')}</div>` : ''}
       </li>`;
     }).join('');
+    S.todoNew = null;                                // only the item just added slides in
     $('#tdEmpty').hidden = S.todo.length > 0;
     $('#tdClearDone').hidden = !done.length;
     $('#tdLeft').textContent = S.todo.length ? `${open.length} left` : '';
@@ -1692,16 +1779,22 @@
   }
 
   // How much of the map's right side an open to-do list hides (it closes itself on phones before the map moves).
-  const todoCover = () => (desktop.matches && !$('#todo').hidden ? $('#todo').offsetWidth : 0);
+  // (the list floats a little in from the edge, so this runs from its left side to the map's right edge)
+  const todoCover = () => (desktop.matches && $('#layout').classList.contains('todo-open') ? $('#mapView').clientWidth - $('#todo').offsetLeft : 0);
+
+  // Room for the place card beside the to-do list? Measured on the open part of the map, between
+  // the side panel and the right edge (iPad landscape: yes; portrait with the side panel open: no).
+  function updateRoom() {
+    $('#layout').classList.toggle('todo-room', desktop.matches && $('#mapView').clientWidth - sideCover() >= 720);
+  }
 
   function setTodoOpen(open, save) {
     $('#layout').classList.toggle('todo-open', open);
-    $('#todo').hidden = !open;
+    open ? showSoftly($('#todo')) : hideSoftly($('#todo'), 360);
     const b = $('#todoToggle');
     b.setAttribute('aria-expanded', String(open));
     b.setAttribute('aria-label', open ? 'Hide the to-do list' : 'Show the to-do list');
     if (save) store.set('todoOpen', open);
-    setMapBounds();
   }
 
   // Fit the map to every pin of a layer (orchids, gator eggs).
@@ -1709,7 +1802,7 @@
     const pts = S.data.places.filter((p) => p.type === type && p.x != null);
     if (!pts.length) return;
     if (!desktop.matches) setView('map');
-    S.map.fitBounds(L.latLngBounds(pts.map(ll)), { paddingTopLeft: [40 + sideCover(), 40], paddingBottomRight: [40 + todoCover(), 40], maxZoom: -0.5 });
+    glideToBounds(L.latLngBounds(pts.map(ll)), { paddingTopLeft: [40 + sideCover(), 40], paddingBottomRight: [40 + todoCover(), 40], maxZoom: -0.5 });
   }
 
   /* ---------- hunting spot finder (map tab) ----------
@@ -1861,7 +1954,7 @@
       ${p.type === 'hunt' ? huntDetails(p) : ''}
       <div class="pc-src">${src}${p.approx && p.type !== 'hunt' ? '<span class="mono pc-approx">Approximate position</span>' : ''}</div>
       ${related.length ? `<div class="pc-topics"><h3>In the guide</h3>${related.map((tp) => `<button class="pc-link" type="button" data-topic="${esc(tp.id)}"><span>${esc(tp.title)}</span><span>${pageLabel(tp)}</span></button>`).join('')}</div>` : ''}`;
-    card.hidden = false;
+    showSoftly(card);
     card.scrollTop = 0;
     $('.pc-close', card).onclick = closePlace;
     renderFoundBtn(p);
@@ -1890,8 +1983,8 @@
 
   function closePlace() {
     const card = $('#placeCard');
-    if (card.hidden) return;
-    card.hidden = true;
+    if (!isShown(card)) return;
+    hideSoftly(card);
     selectMarker(null);
     if (location.hash.startsWith('#place=')) history.replaceState(null, '', location.pathname + location.search);
   }
@@ -1938,11 +2031,11 @@
   const smooth = () => (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
   // Scroll so the element sits just below the sticky header (phones: the page; wide screens:
-  // the sidebar, under its tabs). Long jumps skip the smooth animation.
+  // the top of the sidebar). Long jumps skip the smooth animation.
   function scrollToEl(el) {
     if (desktop.matches) {
       const box = $('#sidebar');
-      const target = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - $('.sb-tabs').offsetHeight - 10;
+      const target = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 10;
       const far = Math.abs(target - box.scrollTop) > box.clientHeight * 3;
       box.scrollTo({ top: target, behavior: far ? 'auto' : smooth() });
       return;

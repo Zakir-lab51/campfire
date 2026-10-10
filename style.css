@@ -136,7 +136,7 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
 .results-empty { padding: 18px 12px; color: var(--ink-dim); }
 
 /* ---------- layout (phones: one view at a time) ---------- */
-.view-map { position: relative; height: calc(100dvh - var(--header-h)); }
+.view-map { position: relative; height: calc(100dvh - var(--header-h)); overflow: hidden; }   /* the to-do list's slide-in never widens the page */
 .app:is([data-view="guide"], [data-view="hundred"]) .view-map { display: none; }
 .sidebar { background: var(--paper); overflow-x: hidden; }
 .sb-tabs, .sb-drawer-head { display: none; }
@@ -405,9 +405,6 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
 
 /* ---------- leaflet: controls, pins ---------- */
 .leaflet-container { font-family: var(--f-ui); background: #c3ad85; }
-.leaflet-control-zoom { border: 1px solid var(--line-2) !important; border-radius: 10px !important; overflow: hidden; box-shadow: var(--shadow) !important; }
-.leaflet-control-zoom a { width: 40px !important; height: 40px !important; line-height: 40px !important; background: var(--panel) !important; color: var(--ink) !important; border-bottom-color: var(--line) !important; }
-@media (max-width: 739px), (max-width: 959px) and (max-height: 599px) { .leaflet-control-zoom { display: none; } }
 
 /* teardrop pins with a white picture; smaller when zoomed out */
 .mk { display: block; }
@@ -463,6 +460,9 @@ mark { background: rgba(201, 90, 40, 0.24); color: var(--ink); border-radius: 3p
   .app.panel-collapsed .panel-toggle { left: 0; }
   .map-bottom { left: calc(var(--side-w) + 10px); transition: left .28s var(--ease); }
   .app.panel-collapsed .map-bottom { left: 10px; }
+  /* with the to-do list open: fit in the gap between the panes, or sit over the list when the gap is too narrow */
+  .app.todo-open .map-bottom { z-index: 692; width: min(380px, max(280px, calc(100vw - var(--side-w) - var(--todo-w) - 24px))); }
+  .app.todo-open.panel-collapsed .map-bottom { width: min(380px, max(280px, calc(100vw - var(--todo-w) - 24px))); }
   .map-bottom { right: auto; width: 380px; }
   .placecard { left: auto; right: 14px; top: 14px; bottom: auto; width: 360px; max-height: calc(100% - 90px); }
   .placecard .grab { display: none; }
@@ -532,7 +532,9 @@ button, a, .chip, .cat, .mk, .hd-check { -webkit-tap-highlight-color: transparen
 .todo-toggle:hover { color: var(--ember); }
 .todo-badge { min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--ember); color: #fff8ec; font: 700 10.5px/16px var(--f-ui); text-align: center; }
 .todo-badge[hidden] { display: none; }
-.app.todo-open .todo-toggle { display: none; }               /* the list's own › button closes it */
+/* phones: the open list covers most of the screen, so its own › in the header closes it */
+.app.todo-open .todo-toggle { display: none; }
+.todo-toggle .tt-chev { display: none; }
 .app.todo-open .leaflet-right { right: var(--todo-w); }
 /* wide screens: keep the place card clear of the tab while the list is folded away */
 @media (min-width: 960px), (min-width: 740px) and (min-height: 600px) { .app:not(.todo-open) .placecard { right: calc(var(--todo-tab) + 10px); } }
@@ -580,7 +582,6 @@ button, a, .chip, .cat, .mk, .hd-check { -webkit-tap-highlight-color: transparen
 @media (pointer: coarse) { .td-box { width: 34px; height: 34px; } .td-step { width: 38px; height: 38px; } .td-need button { width: 34px; height: 34px; } } 
 /* wide screens: the place card and the bottom bar move left of an open to-do list when the map has room */
 .app.todo-open.todo-room .placecard { right: calc(var(--todo-w) + 14px); }
-.app.todo-open.todo-room .map-bottom { right: calc(var(--todo-w) + 10px); }
 
 /* ---------- 100% checklist ---------- */
 .sb-hundred { padding: 10px 16px 40px; }
@@ -646,3 +647,291 @@ button, a, .chip, .cat, .mk, .hd-check { -webkit-tap-highlight-color: transparen
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root { --glass: rgba(236, 224, 197, 0.92); }
 }
+
+/* ==========================================================================
+   Liquid glass: floating, rounded panes and tiles. The map shows through,
+   blurred and colour-lifted; bright edges and a soft sheen catch the light.
+   (Panes blur what's behind them. Tiles inside a pane don't blur again,
+   because a blur inside a blur can't see the map; they're a milky layer instead.)
+   ========================================================================== */
+:root {
+  --lg-gap: 10px;                                   /* panes float this far in from the screen edges */
+  --lg-r: 26px;                                     /* pane corners */
+  --lg-r-tile: 18px;                                /* tile corners */
+  --lg-tint: rgba(255, 251, 243, .06);
+  --lg-tint-strong: rgba(255, 251, 243, .68);       /* (kept for "Reduce transparency") */
+  /* cards over the map (place card, range panel): the panes' own glass, a touch frostier because
+     their text sits straight on the glass; the transparency slider moves both together */
+  --lg-card-tint: rgba(255, 251, 243, .16);
+  --lg-card-blur: blur(17px) saturate(1.25) brightness(1.06);
+  --lg-blur: blur(13px) saturate(1.25) brightness(1.06);
+  --lg-sheen: linear-gradient(155deg, rgba(255, 255, 255, .34) 0%, rgba(255, 255, 255, .08) 24%, rgba(255, 255, 255, 0) 50%, rgba(255, 255, 255, .07) 100%);
+  --lg-edge: rgba(255, 255, 255, .58);
+  --lg-light: inset 0 1px 0 rgba(255, 255, 255, .8), inset 0 -1px 0 rgba(255, 255, 255, .22), inset 0 0 0 1px rgba(255, 255, 255, .14);
+  --lg-drop: 0 22px 44px -22px rgba(40, 24, 8, .55), 0 3px 10px -4px rgba(40, 24, 8, .2);
+  --tile-bg: linear-gradient(160deg, rgba(255, 240, 214, .32), rgba(246, 226, 192, .08));   /* warm cream, like the rest of the glass */
+  --tile-edge: rgba(255, 239, 212, .7);
+  --tile-light: inset 0 1px 0 rgba(255, 246, 228, .8), 0 8px 18px -12px rgba(40, 24, 8, .35);
+  --cream: rgba(255, 242, 220, .42);                /* chips, fields and small buttons inside the panes */
+  --cream-edge: rgba(255, 236, 206, .75);
+  --todo-x: calc(var(--todo-w) + var(--lg-gap));    /* how far an open to-do list reaches in from the right */
+}
+
+/* glass surfaces that sit over the map */
+.todo, .placecard, .range-panel, .map-hits, .map-fab, .panel-toggle, .todo-toggle {
+  background: var(--lg-sheen), var(--lg-tint) !important;
+  -webkit-backdrop-filter: var(--lg-blur); backdrop-filter: var(--lg-blur);
+  border: 1px solid var(--lg-edge) !important;
+  box-shadow: var(--lg-light), var(--lg-drop) !important;
+}
+.placecard, .range-panel { background: var(--lg-sheen), var(--lg-card-tint) !important; -webkit-backdrop-filter: var(--lg-card-blur); backdrop-filter: var(--lg-card-blur); }
+
+/* the to-do list: a floating sheet */
+.todo { top: var(--lg-gap); right: var(--lg-gap); bottom: calc(var(--lg-gap) + env(safe-area-inset-bottom)); border-radius: var(--lg-r); overflow: hidden; padding-bottom: 0; }
+.td-head { border-bottom-color: rgba(255, 255, 255, .45); }
+.todo-toggle { right: var(--lg-gap); border-radius: 18px; }
+.app.todo-open .leaflet-right { right: var(--todo-x); }
+.app.todo-open.todo-room .placecard { right: calc(var(--todo-x) + 14px); }
+
+/* buttons and cards over the map */
+.map-fab { border-radius: 16px; }
+.panel-toggle { border-radius: 18px; }
+.map-hits { border-radius: 18px; }
+.range-panel { border-radius: 22px; }
+.placecard { border-radius: var(--lg-r); }
+.results { border-radius: 22px; background: var(--lg-sheen), rgba(250, 243, 228, .94); border-color: var(--lg-edge); box-shadow: var(--lg-light), var(--lg-drop); }
+
+/* tiles inside the panes */
+.progress, .hunt-finder, .hd-prog, .hd-info, .intro, .sec, .toc-list button, .stats div, .td-item, .hf-spot, .topic, .pc-link {
+  background: var(--tile-bg); border: 1px solid var(--tile-edge); box-shadow: var(--tile-light);
+}
+.progress, .hunt-finder, .hd-prog, .hd-info, .intro, .sec { border-radius: var(--lg-r-tile); }
+.toc-list button, .stats div, .topic, .hf-spot, .pc-link { border-radius: 14px; }
+.td-list { padding: 8px 12px 12px; display: grid; gap: 8px; align-content: start; }
+.td-item { padding: 10px 12px; border-radius: 16px; }
+.td-item.is-done { opacity: .72; }
+.chip { background: var(--cream); border-color: var(--cream-edge); box-shadow: inset 0 1px 0 rgba(255, 247, 232, .75); }
+.chip[aria-pressed="true"] { box-shadow: none; }
+.search, .hf-search, .td-input { border-radius: 16px; background: rgba(255, 243, 222, .5); border-color: var(--cream-edge); box-shadow: inset 0 1px 2px rgba(40, 24, 8, .08); }
+.td-sugg { border-radius: 18px; background: var(--lg-sheen), rgba(250, 243, 228, .96); border-color: var(--lg-edge); box-shadow: var(--lg-light), var(--lg-drop); }
+.td-box, .hd-check { border-radius: 9px; }
+.td-need button, .td-step { border-radius: 10px; background: var(--cream); border-color: var(--cream-edge); }
+.td-box { background: rgba(255, 243, 222, .5); }
+
+/* phones: the to-do list and the categories drawer float too */
+@media (max-width: 739px), (max-width: 959px) and (max-height: 599px) {
+  .app[data-view="map"] .sidebar {
+    top: calc(var(--lg-gap) + env(safe-area-inset-top)); bottom: calc(var(--lg-gap) + env(safe-area-inset-bottom)); left: var(--lg-gap);
+    border-radius: var(--lg-r); border: 1px solid var(--lg-edge); box-shadow: var(--lg-light), var(--lg-drop);
+    background: var(--lg-sheen), var(--lg-tint); -webkit-backdrop-filter: var(--lg-blur); backdrop-filter: var(--lg-blur);
+  }
+  .app[data-view="map"] .sb-drawer-head { padding-top: 12px; background: rgba(250, 243, 228, .7); border-bottom-color: rgba(255, 255, 255, .45); }
+  .app[data-view="map"]:not(.drawer-open) .sidebar { transform: translateX(calc(-100% - 2 * var(--lg-gap) - 30px)); }   /* fully off-screen, shadow too */
+  .placecard { left: var(--lg-gap); right: var(--lg-gap); bottom: calc(var(--lg-gap) + env(safe-area-inset-bottom)); }
+}
+
+/* wide screens: the side panel is one floating sheet (search on top, panel below) that slides away */
+@media (min-width: 960px), (min-width: 740px) and (min-height: 600px) {
+  .topbar, .sidebar { margin-left: var(--lg-gap); -webkit-backdrop-filter: var(--lg-blur); backdrop-filter: var(--lg-blur); border: 1px solid var(--lg-edge); }
+  .topbar {
+    margin-top: var(--lg-gap); border-bottom: 0; border-radius: var(--lg-r) var(--lg-r) 0 0;
+    background: var(--lg-sheen), var(--lg-tint); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 -6px 30px -20px rgba(40, 24, 8, .4);
+  }
+  .sidebar {
+    margin-bottom: var(--lg-gap); border-top: 0; border-radius: 0 0 var(--lg-r) var(--lg-r);
+    background: var(--lg-tint); box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .3), var(--lg-drop);
+  }
+  .sb-tabs { background: rgba(255, 251, 243, .6) !important; border-bottom-color: rgba(255, 255, 255, .55) !important; }
+  /* folding: the sheet slides out instead of squeezing (the map underneath never moves) */
+  .app.panel-collapsed { grid-template-columns: var(--side-w) minmax(0, 1fr); }
+  .topbar, .sidebar { transition: transform .32s var(--ease), opacity .32s var(--ease); }
+  .app.panel-collapsed :is(.topbar, .sidebar) {
+    transform: translateX(calc(-100% - 2 * var(--lg-gap))); opacity: 0; visibility: hidden;
+    transition: transform .32s var(--ease), opacity .32s var(--ease), visibility 0s .32s;
+  }
+  .panel-toggle { left: calc(var(--side-w) + 8px); }
+  .app.panel-collapsed .panel-toggle { left: var(--lg-gap); }
+  .map-bottom { left: calc(var(--side-w) + 12px); }
+  .app.panel-collapsed .map-bottom { left: var(--lg-gap); }
+  .placecard { top: var(--lg-gap); right: var(--lg-gap); }
+  .app:not(.todo-open) .placecard { right: calc(var(--lg-gap) + var(--todo-tab) + 10px); }
+  .app.todo-open .map-bottom { width: min(380px, max(280px, calc(100vw - var(--side-w) - var(--todo-x) - 26px))); }
+  /* the to-do list's tab mirrors the side panel's: just outside the list's left edge, level with the
+     other tab, › to fold it away (the › inside the list's header goes) */
+  .app.todo-open .todo-toggle { display: grid; right: calc(var(--todo-x) + 8px); width: 26px; }
+  .app.todo-open .todo-toggle :is(.tt-icon, .todo-badge) { display: none; }
+  .app.todo-open .todo-toggle .tt-chev { display: block; width: 18px; height: 18px; stroke-width: 2.2; }
+  .td-close { display: none; }
+  .app.todo-open.todo-room .placecard { right: calc(var(--todo-x) + 42px); }          /* clear of that tab */
+  .app.todo-open.panel-collapsed .map-bottom { width: min(380px, max(280px, calc(100vw - var(--todo-x) - 26px))); }
+}
+
+/* ---------- top of the sheet: brand + round search button, then the segmented tabs ---------- */
+.topbar { grid-template-columns: minmax(0, 1fr) 46px; grid-template-areas: "brand search" "tabs tabs"; }
+.brand, .brand-text { min-width: 0; }
+.brand-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* never runs under the search button */
+/* search: a round glass button that grows over the brand row into the field */
+.search {
+  grid-row: 1; grid-column: 1 / -1; justify-self: end; z-index: 3; width: 46px; height: 46px; padding: 0; overflow: hidden;
+  border-radius: 23px; background: rgba(255, 242, 220, .5); border: 1px solid var(--cream-edge);
+  box-shadow: inset 0 1px 0 rgba(255, 247, 232, .85), 0 6px 16px -8px rgba(40, 24, 8, .4);
+  transition: width .42s cubic-bezier(.3, 1.15, .4, 1), background .25s var(--ease), box-shadow .25s var(--ease);
+}
+.search.is-open { width: 100%; background: rgba(255, 245, 228, .86); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.search-btn { flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--ink); display: grid; place-items: center; }
+.search-btn .search-icon { width: 21px; height: 21px; margin: 0; color: currentColor; stroke-width: 2.1; }
+.search-btn:active { transform: scale(.94); }
+.search input { padding: 0 4px 0 0; opacity: 0; transition: opacity .2s var(--ease) .08s; }
+.search.is-open input { opacity: 1; }
+.search-clear { flex: none; width: 44px; height: 44px; opacity: 0; pointer-events: none; transition: opacity .2s var(--ease); }
+.search.is-open .search-clear { opacity: 1; pointer-events: auto; }
+.search-kbd { display: none !important; }
+
+/* segmented control (side panel tabs on wide screens, view switcher on phones): a glass track with a
+   bright pill that slides to the chosen tab (--i is set by the script) */
+.seg {
+  position: relative; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 4px; border-radius: 999px;
+  background: rgba(255, 238, 210, .26); border: 1px solid var(--cream-edge);
+  box-shadow: inset 0 1px 3px rgba(40, 24, 8, .16), inset 0 -1px 0 rgba(255, 244, 224, .55);
+}
+.seg::before {
+  content: ""; position: absolute; z-index: 0; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 249, 238, .97), rgba(255, 238, 212, .8)); border: 1px solid rgba(255, 246, 230, .95);
+  box-shadow: 0 5px 14px -5px rgba(40, 24, 8, .4), inset 0 -1px 0 rgba(40, 24, 8, .06);
+  transform: translateX(calc(var(--i, 0) * 100%)); transition: transform .45s cubic-bezier(.3, 1.3, .45, 1);
+}
+.seg button {
+  position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 6px; height: 38px; padding: 0 6px;
+  border: 0 !important; border-radius: 999px; background: none !important; color: var(--ink-dim);
+  font: 700 13.5px var(--f-ui); text-transform: none; letter-spacing: 0; white-space: nowrap; transition: color .2s var(--ease);
+}
+.seg button svg { display: block !important; width: 17px; height: 17px; flex: none; }
+.seg button:is([aria-selected="true"], [aria-pressed="true"]) { color: var(--ink); }
+.seg button:is([aria-selected="true"], [aria-pressed="true"]) svg { color: var(--ember); }
+.viewtabs.seg { grid-area: tabs; justify-self: stretch; width: 100%; display: grid; }
+
+/* wide screens: brand on the left, search button on the right, tabs below; nothing sticky in the panel */
+@media (min-width: 960px), (min-width: 740px) and (min-height: 600px) {
+  .topbar { grid-template-columns: minmax(0, 1fr) 46px; grid-template-areas: "brand search" "tabs tabs"; gap: 12px 10px; padding: 14px 14px 12px; }
+  .brand { justify-content: flex-start; padding: 0 0 0 4px; }
+  .sb-tabs.seg { grid-area: tabs; display: grid; position: relative; top: auto; background: rgba(255, 238, 210, .26) !important; border: 1px solid var(--cream-edge) !important; }
+  .sb-tabs.seg button { height: 38px; font: 700 13.5px var(--f-ui); }
+  .results { top: calc(100% + 6px); }
+}
+@media (pointer: coarse) { .seg button, .sb-tabs.seg button { height: 40px; } }
+
+/* transparency slider: a small glass tile under Progress */
+.glass-ctl {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label val" "range range"; align-items: center; gap: 2px 10px;
+  margin: 10px 0 2px; padding: 10px 12px 6px; border-radius: var(--lg-r-tile);
+  background: var(--tile-bg); border: 1px solid var(--tile-edge); box-shadow: var(--tile-light);
+}
+.gc-label { grid-area: label; font: 800 13px var(--f-head); text-transform: uppercase; letter-spacing: .12em; }
+.gc-val { grid-area: val; font: 500 12px var(--f-mono); color: var(--ink-dim); text-align: right; }
+.glass-ctl input[type="range"] { grid-area: range; }
+.glass-ctl input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 30px; margin: 0; background: none; cursor: pointer;
+}
+.glass-ctl input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px; border-radius: 6px; border: 1px solid var(--cream-edge);
+  background: linear-gradient(90deg, rgba(184, 70, 31, .55) var(--v, 70%), rgba(255, 242, 220, .45) var(--v, 70%));
+  box-shadow: inset 0 1px 2px rgba(40, 24, 8, .15);
+}
+.glass-ctl input[type="range"]::-moz-range-track { height: 8px; border-radius: 6px; border: 1px solid var(--cream-edge); background: rgba(255, 242, 220, .45); }
+.glass-ctl input[type="range"]::-moz-range-progress { height: 8px; border-radius: 6px; background: rgba(184, 70, 31, .55); }
+.glass-ctl input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 24px; height: 24px; margin-top: -9px; border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 249, 238, .98), rgba(255, 236, 208, .9)); border: 1px solid rgba(255, 246, 230, .95);
+  box-shadow: 0 3px 8px -2px rgba(40, 24, 8, .45), inset 0 -1px 0 rgba(40, 24, 8, .08);
+}
+.glass-ctl input[type="range"]::-moz-range-thumb {
+  width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(255, 246, 230, .95);
+  background: linear-gradient(180deg, rgba(255, 249, 238, .98), rgba(255, 236, 208, .9)); box-shadow: 0 3px 8px -2px rgba(40, 24, 8, .45);
+}
+@media (pointer: coarse) { .glass-ctl input[type="range"]::-webkit-slider-thumb { width: 28px; height: 28px; margin-top: -11px; } }
+
+/* iPad-sized sheets are a little narrower now that they float: give the category names the room back */
+@media (min-width: 740px) and (max-width: 1099px) and (min-height: 600px) {
+  .sb-map { padding-left: 11px; padding-right: 11px; }
+  .brand-sub { font-size: 9.5px; letter-spacing: .05em; }
+}
+.cat-name { -webkit-hyphens: auto; hyphens: auto; }
+
+/* "Reduce transparency" in the device's settings: solid panes */
+@media (prefers-reduced-transparency: reduce) {
+  :root { --lg-tint: rgba(240, 230, 207, .97); --lg-tint-strong: rgba(240, 230, 207, .98); --lg-card-tint: rgba(240, 230, 207, .98); }
+}
+
+/* ==========================================================================
+   Motion: one soft family of curves for everything. Long, gentle ease-outs for things
+   that travel; a light spring for small things that land; quick ease-ins for leaving.
+   Only transform and opacity move (the GPU does those), never layout.
+   ========================================================================== */
+:root {
+  --ease: cubic-bezier(.22, 1, .36, 1);             /* ease-out-quint: fast start, long soft landing */
+  --ease-in: cubic-bezier(.55, 0, .8, .35);         /* for leaving */
+  --spring: cubic-bezier(.34, 1.32, .6, 1);         /* a small, calm overshoot */
+  --t-move: .5s;                                    /* panes sliding */
+  --t-in: .42s;                                     /* cards arriving */
+  --t-out: .22s;                                    /* cards leaving */
+}
+
+/* side panel sheet and its tab glide together */
+@media (min-width: 960px), (min-width: 740px) and (min-height: 600px) {
+  .topbar, .sidebar { will-change: transform; transition: transform var(--t-move) var(--ease), opacity calc(var(--t-move) * .7) var(--ease); }
+  .app.panel-collapsed :is(.topbar, .sidebar) {
+    transition: transform var(--t-move) var(--ease), opacity calc(var(--t-move) * .6) var(--ease-in), visibility 0s var(--t-move);
+  }
+  .panel-toggle { transition: left var(--t-move) var(--ease), transform .2s var(--spring); }
+  .map-bottom { transition: left var(--t-move) var(--ease); }
+  .todo-toggle { transition: right var(--t-move) var(--ease), transform .2s var(--spring); }
+  .leaflet-right { transition: right var(--t-move) var(--ease); }
+  .placecard { transition: right var(--t-move) var(--ease); }
+}
+.panel-toggle svg { transition: transform var(--t-move) var(--ease); }
+
+/* the to-do list slides in from the right edge and back out again */
+.todo { will-change: transform; animation: todoIn var(--t-move) var(--ease); }
+@keyframes todoIn { from { transform: translateX(calc(100% + 24px)); opacity: .2; } }
+.todo.is-leaving { animation: todoOut calc(var(--t-move) * .7) var(--ease-in) forwards; pointer-events: none; }
+@keyframes todoOut { to { transform: translateX(calc(100% + 24px)); opacity: .2; } }
+
+/* phones: the categories drawer */
+@media (max-width: 739px), (max-width: 959px) and (max-height: 599px) {
+  .app[data-view="map"] .sidebar { transition: transform var(--t-move) var(--ease), visibility 0s; }
+  .app[data-view="map"]:not(.drawer-open) .sidebar { transition: transform calc(var(--t-move) * .7) var(--ease-in), visibility 0s calc(var(--t-move) * .7); }
+}
+
+/* cards: rise in softly, sink away quickly */
+.placecard, .range-panel, .map-hits { animation: cardIn var(--t-in) var(--ease); }
+@keyframes cardIn { from { opacity: 0; transform: translateY(16px) scale(.985); } }
+:is(.placecard, .range-panel, .map-hits).is-leaving { animation: cardOut var(--t-out) var(--ease-in) forwards; pointer-events: none; }
+@keyframes cardOut { to { opacity: 0; transform: translateY(12px) scale(.985); } }
+.results { animation: dropIn .3s var(--ease); }
+@keyframes dropIn { from { opacity: 0; transform: translateY(-8px) scale(.985); } }
+.results.is-leaving { animation: dropOut .16s var(--ease-in) forwards; pointer-events: none; }
+@keyframes dropOut { to { opacity: 0; transform: translateY(-6px) scale(.99); } }
+.result { animation: rise .36s var(--ease) both; }
+
+/* search grows without overshooting (an overshoot made it wobble past the edge) */
+.search { transition: width .48s var(--ease), background .3s var(--ease), box-shadow .3s var(--ease); }
+.search input { transition: opacity .28s var(--ease) .12s; }
+.search:not(.is-open) input { transition-delay: 0s; transition-duration: .12s; }
+
+/* segmented control: the pill glides and settles */
+.seg::before { transition: transform .52s var(--spring); }
+.seg button { transition: color .3s var(--ease); }
+
+/* to-do items: a new one slides in, a removed one folds away, a tick pops */
+.td-item.is-new { animation: itemIn .45s var(--ease); }
+@keyframes itemIn { from { opacity: 0; transform: translateY(-10px) scale(.97); } }
+.td-item.is-leaving { animation: itemOut .24s var(--ease-in) forwards; pointer-events: none; }
+@keyframes itemOut { to { opacity: 0; transform: translateX(24px) scale(.96); } }
+.td-box.is-pop { animation: pop .4s var(--spring); }
+@keyframes pop { 0% { transform: scale(.7); } 100% { transform: scale(1); } }
+.td-box, .hd-check { transition: background .25s var(--ease), border-color .25s var(--ease), transform .2s var(--spring); }
+
+/* a soft press on everything you tap */
+:is(.search-btn, .seg button, .td-box, .td-need button, .td-step, .hd-check, .panel-toggle, .todo-toggle, .map-fab, .pc-found, .hf-spot, .pc-link, .actbtn):active { transform: scale(.95); }
+:is(.search-btn, .td-need button, .td-step, .map-fab, .pc-found, .hf-spot, .pc-link, .actbtn) { transition: transform .2s var(--spring), background .25s var(--ease), border-color .25s var(--ease), color .25s var(--ease); }
+.chip { transition: background .25s var(--ease), color .25s var(--ease), border-color .25s var(--ease), transform .2s var(--spring); }
